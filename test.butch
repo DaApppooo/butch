@@ -1,0 +1,8 @@
+
+# empty because it can only stay this class if it's neither an arggroup nor a
+# paramgroup
+Name = '*[A-Za-z_][A-Za-z0-9_]*'
+EmptyGroup = '(.*)'
+ParamGroup = "(" ( . Name "," ) * . Name ')'
+ArgGroup = "("  ")"
+
