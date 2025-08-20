@@ -4,7 +4,7 @@ int main(int argc, const char** argv)
 {
   if (argc == 1)
   {
-    perror("Syntax: readtest <file>");
+    fprintf(stderr, "Syntax: readtest <file>\n");
     return 1;
   }
   auto res = Parser::read_file(argv[1]);
@@ -13,7 +13,7 @@ int main(int argc, const char** argv)
     switch (res.err.type)
     {
       case Parser::Error::CANT_OPEN_FILE:
-        perror("Couldn't open file.");
+        fprintf(stderr, "Couldn't open file.\n");
         break;
       case Parser::Error::DOUBLE_QUOTE_MISMATCH:
         fprintf(stderr, "Double quote mismatch at char %i\n", res.err.offset);

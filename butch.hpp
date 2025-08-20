@@ -1,8 +1,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <vector>
-#include <type_traits>
+#include "list.hpp"
 
 enum ResultType { OK, ERR };
 template <class Ok = int, class Err = int>
@@ -63,45 +62,15 @@ Result<Ok,Err> err(Err&& err_) { return Result<Ok, Err>(ERR, err_); }
 #define expect(COND, OK_TYPE, ERROR_CODE) \
   if (!(COND)) return err<OK_TYPE>(ERROR_CODE)
 
-template <class T>
-struct View
-{
-  using mut_T = std::remove_const<T>;
-  T* begin; uint32_t len;
-  View() {}
-  View(T* begin, uint32_t len) : begin(begin), len(len) {}
-  View(T* begin, T* end) : begin(begin), len(end-begin) {}
-  View(const View<T>& v) : begin(v.begin), len(v.len) {}
-  View(const View<T>&& v) : begin(v.begin), len(v.len) {}
-  View<T>& operator = (const View<T>& v)
-  { begin = v.begin; len = v.len; return *this; }
-  View<mut_T> mut() const
-  { return {const_cast<mut_T>(begin), len}; }
-};
-template <>
-struct View<char>
-{
-  char* begin; uint32_t len;
-  View() {}
-  View(char* begin, uint32_t len) : begin(begin), len(len) {}
-  View(char* begin, char* end) : begin(begin), len(end-begin) {}
-  View(const View<char>& v) : begin(v.begin), len(v.len) {}
-  View(const View<char>&& v) : begin(v.begin), len(v.len) {}
-  View<char>& operator = (const View<char>& v)
-  { begin = v.begin; len = v.len; return *this; }
-  char fix() const
-  { char tmp = begin[len-1]; begin[len-1] = 0; return tmp; }
-  void mov(char c) const
-  { begin[len-1] = c; }
-};
 
 typedef int16_t rule_id;
 typedef int16_t class_name_id;
 constexpr rule_id GROUP_BEGIN = -1; // basically doing token-scale regex
 constexpr rule_id GROUP_END = -2;
-constexpr rule_id STAR = -3;
-constexpr rule_id PLUS = -4;
-constexpr rule_id DOT = -5;
+constexpr rule_id PLUS = -3;
+constexpr rule_id DOT = -4;
+constexpr rule_id PIPE = -5;
+constexpr class_name_id NO_PARENT = -1;
 struct Parser;
 template <class T> using Own = T;
 template <class T> using Ref = T;
@@ -115,8 +84,8 @@ struct Unit
   uint16_t str_len;
 
   Unit() {}
-  Unit(uint16_t id, uint32_t begin, uint16_t len)
-    : str_begin(begin), id(id), str_len(len) {}
+  Unit(uint16_t id, uint32_t begin, uint16_t len, int children_count)
+    : str_begin(begin), id(id), str_len(len), children_len(children_count) {}
   Unit(const Unit& u) : str_begin(u.str_begin), id(u.id), str_len(u.str_len) {}
   Unit(const Unit&& u) : str_begin(u.str_begin), id(u.id), str_len(u.str_len) {}
 
@@ -126,7 +95,24 @@ struct Unit
 
 struct Rule
 {
+  struct MatchDescriptor
+  {
+    uint32_t str_begin;
+    uint16_t str_len;
+    bool matched;
+  };
+  enum AtomType
+  {
+    ATOM_STRING_MATCH, // "string exact match"
+    ATOM_REGEX_MATCH, // 'regex expression'
+    ATOM_SYMBOL, // regex operators ( | + * . )
+    ATOM_CLASS // class name
+  };
   uint32_t in_len;
+  class_name_id parent; // parent class with 'Parent/Child' syntax
+                        // useful for precision parsing.
+                        // (use a global class for all of cases and for one
+                        // specific case use a child class)
   class_name_id out;
   rule_id* in;
   static Rule init(uint32_t input_count)
@@ -134,8 +120,10 @@ struct Rule
     Rule self;
     self.in_len = input_count;
     self.in = new rule_id[input_count];
+    self.parent = NO_PARENT;
     return self;
   }
+  MatchDescriptor match(Parser& parser, View<Unit> units);
   void destroy()
   {
     delete[] in;
@@ -161,35 +149,47 @@ struct Parser
   char* butch_code;
   // i hate to mix lifetime handling technics, but i can't be bothered
   // writing linear dynamic array
-  std::vector<View<char>> classes;
-  std::vector<Rule> rules;
+  list<View<char>> classes;
+  list<Rule> rules;
 
   Parser() :
     butch_code(nullptr),
     classes(),
     rules()
-  {}
+  { classes.init(); rules.init(); }
 
   static Result<Own<Parser>, Error> read(Own<char*> s);
   static Result<Own<Parser>, Error> read_file(Ref<const char*> filename)
   { return Parser::read(_butch_read_file(filename)); }
   void _make_rule(Rule& r, Ref<char*>& s);
   rule_id _find_or_make_class(View<char>);
+  bool _check_and_do_rule(Rule& r, list<Unit>& out);
   RulePack operator [] (int index)
   { return {classes[index], rules[index]}; }
   void debug(FILE* f);
-  std::vector<Unit> parse(Ref<char*> s);
-  std::vector<Unit> parse_file(Ref<const char*> filename)
+  Own<list<Unit>> parse(Ref<char*> s);
+  Own<list<Unit>> parse_file(Ref<const char*> filename)
   {
     char* code = _butch_read_file(filename);
     auto ret = parse(code);
     free(code);
     return ret;
   }
+  Rule::AtomType atom_type(rule_id in)
+  {
+    if (in < 0) return Rule::ATOM_SYMBOL;
+    const char* const s = classes[in].start;
+    if (*s == '"') return Rule::ATOM_STRING_MATCH;
+    if (*s == '\'') return Rule::ATOM_REGEX_MATCH;
+    return Rule::ATOM_CLASS;
+  }
   void destroy()
-  { free(butch_code);
-    for (Rule& r : rules) r.destroy();
-    butch_code = nullptr; }
+  {
+    free(butch_code);
+    butch_code = nullptr;
+    classes.destroy();
+    rules.destroy();
+  }
 };
 
 
