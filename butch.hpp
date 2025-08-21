@@ -89,7 +89,7 @@ struct Unit
   Unit(const Unit& u) : str_begin(u.str_begin), id(u.id), str_len(u.str_len) {}
   Unit(const Unit&& u) : str_begin(u.str_begin), id(u.id), str_len(u.str_len) {}
 
-  View<char*> name(Parser&);
+  View<char> str(Parser&);
   Unit& child(Parser&);
 };
 

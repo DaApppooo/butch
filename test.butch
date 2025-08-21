@@ -4,6 +4,12 @@
 Name = '*[A-Za-z_][A-Za-z0-9_]*'
 Number = '[+-]?[0-9]+'
 
+A = ( "A" | ) + "B" | "C"
+rpt ^
+	  
+A AAB
+AB
+C
 
 # ratio bottom mask to bottom lens : 0.39
 # ratio lens size : 0.31

@@ -98,8 +98,6 @@ void Parser::_make_rule(Rule& r, char*& s)
           r.in[i++] = GROUP_END; s++; break;
         case '.':
           r.in[i++] = DOT; s++; break;
-        case '*':
-          r.in[i++] = STAR; s++; break;
         case '+':
           r.in[i++] = PLUS; s++; break;
         default:
@@ -245,7 +243,6 @@ void Parser::debug(FILE* f)
         {
           case GROUP_BEGIN: p = " ("; break;
           case GROUP_END: p = " )"; break;
-          case STAR: p = " *"; break;
           case PLUS: p = " +"; break;
           case DOT: p = " ."; break;
           case PIPE: p = " |"; break;
@@ -269,11 +266,10 @@ View<char> _butch_str_match(View<char> big, View<char> pattern)
 {
   for (int i = 0; i < big.len - pattern.len; i++)
   {
-    if (memcmp(big.start+i, pattern.start, pattern.len))
-    {
-      
-    }
+    if (memcmp(big.start+i, pattern.start, pattern.len) == 0)
+      return {big.start+i, pattern.len};
   }
+  return View<char>(nullptr, nullptr);
 }
 
 inline int _next(int start, View<Unit> units)
@@ -281,22 +277,36 @@ inline int _next(int start, View<Unit> units)
 
 Rule::MatchDescriptor Rule::match(Parser& parser, View<Unit> units)
 {
+  constexpr int STACK_MAX = 64;
   constexpr MatchDescriptor failure = {.matched=false};
-  int rpt = 0; // rule pointer
-  int upt = 0; // units pointer
+  list<int> rpt; // rule pointer
+  list<int> upt; // units pointer
+  int rd = 0; // rule depth
   while (upt < units.len)
   {
-    switch (parser.atom_type(in[rpt]))
+    switch (parser.atom_type(in[rpt[-1]]))
     {
       case ATOM_SYMBOL:
         assert(false); // TODO
         break;
       case ATOM_CLASS:
-        if (units[upt].id != in[rpt])
+        if (units[upt[-1]].id != in[rpt[-1]])
           return failure;
         break;
       case ATOM_STRING_MATCH:
-        
+        {
+        View<char> s;
+        const View<char> big = units[upt[-1]].str(parser);
+        const View<char> patt = parser.classes[in[rpt[-1]]].shorten(1,1);
+        if ((s = _butch_str_match(big, patt)).start)
+          rpt[-1] += _next(rpt[-1], units);
+        else
+        { // failure
+          if (rpt.len() > 0)
+            rpt.pop();
+        }
+        break;
+        }
     }
   }
 }

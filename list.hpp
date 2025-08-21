@@ -39,6 +39,8 @@ struct View
   { start = v.start; len = v.len; return *this; }
   View<mut_T> mut() const
   { return {const_cast<mut_T>(start), len}; }
+  View<T> shorten(int start_off, int end_off)
+  { return View<T>(start+start_off, len-start_off-end_off); }
 };
 template <>
 struct View<char>
@@ -57,6 +59,8 @@ struct View<char>
   { char tmp = start[len]; start[len] = 0; return tmp; }
   void mov(char c) const
   { start[len] = c; }
+  View<char> shorten(int start_off, int end_off)
+  { return View<char>(start+start_off, len-start_off-end_off); }
 };
 
 template <class T> class list
