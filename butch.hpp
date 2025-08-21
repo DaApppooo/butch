@@ -82,7 +82,8 @@ struct Unit
   uint32_t children_len;
   class_name_id id; // points to Parser.rules
   uint16_t str_len;
-
+  inline uint32_t str_end() const { return str_begin + str_len; }
+  
   Unit() {}
   Unit(uint16_t id, uint32_t begin, uint16_t len, int children_count)
     : str_begin(begin), id(id), str_len(len), children_len(children_count) {}
@@ -123,7 +124,7 @@ struct Rule
     self.parent = NO_PARENT;
     return self;
   }
-  MatchDescriptor match(Parser& parser, View<Unit> units);
+  MatchDescriptor _sequence_match(Parser& parser, View<Unit> units);
   void destroy()
   {
     delete[] in;

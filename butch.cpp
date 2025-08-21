@@ -275,38 +275,88 @@ View<char> _butch_str_match(View<char> big, View<char> pattern)
 inline int _next(int start, View<Unit> units)
 { return start+units[start].children_len; }
 
-Rule::MatchDescriptor Rule::match(Parser& parser, View<Unit> units)
+struct RulePt
+{ int pos; int depth; };
+
+bool _butch_failure(
+  list<RulePt>& 
+) {
+  
+}
+
+bool _butch_match_case_str(
+  Parser& parser,
+  list<RulePt>& rpt,
+  list<int>& upt,
+  View<Unit> units,
+  rule_id* in
+) {
+  View<char> s;
+  const View<char> big = units[upt[-1]].str(parser);
+  const View<char> patt = parser.classes[in[rpt[-1].pos]].shorten(1,1);
+  if ((s = _butch_str_match(big, patt)).start)
+    rpt[-1].pos += _next(rpt[-1].pos, units);
+  else
+  { // failure
+    if (rpt.len() > 1)
+      rpt.pop();
+    else
+      return _butch_failure();
+  }
+  return false;
+}
+
+Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
 {
-  constexpr int STACK_MAX = 64;
   constexpr MatchDescriptor failure = {.matched=false};
-  list<int> rpt; // rule pointer
+  MatchDescriptor ret = {.str_begin = units[-1].str_end(), .str_len=0, .matched=true};
+  list<RulePt> rpt; // rule pointer
   list<int> upt; // units pointer
-  int rd = 0; // rule depth
-  while (upt < units.len)
+  /*
+  How the algorithm works:
+  Each (parenthesis) depth level is split in "sectors" (split by PIPE unit).
+  Each sector is a sequence that could potentially match.
+  rpt stack stores options before sector failure (sector failure means one element in the sequence did not match)
+    When an element fails to match:
+      If rpt.len() > 1: rpt.pop()
+      Else: skip until next sector with the same depth (triggers sector failure in 'upt' conditional section)
+        If GROUP_END is reached, then: return failure
+    When a PIPE is reached: skip until next unit after GROUP_END of current depth
+    When a PLUS is reached:
+      If units[rpt[-1]-1] is GROUP_END:
+        find GROUP_BEGIN with same depth at 'position';
+        rpt.push(position);
+        rpt.swap(-1,-2);
+        rpt[-1] += (next)
+      Else:
+        rpt.push(rpt[-1]);
+        rpt[-2]--;
+        rpt[-1] += (next)
+    When a DOT is reached: rpt[-1] += (next)
+  upt stack stores start of each depth:
+    When a sector fails: upt[-1] = upt[-2].
+    When a new depth level is entered: upt.push(upt[-1])
+    When a depth level is exited: upt[-2] = upt[-1]; upt.pop()
+  
+  */
+  while (upt[-1] < units.len)
   {
-    switch (parser.atom_type(in[rpt[-1]]))
+    switch (parser.atom_type(in[rpt[-1].pos]))
     {
       case ATOM_SYMBOL:
         assert(false); // TODO
         break;
       case ATOM_CLASS:
-        if (units[upt[-1]].id != in[rpt[-1]])
+        if (units[upt[-1]].id != in[rpt[-1].pos])
           return failure;
         break;
       case ATOM_STRING_MATCH:
-        {
-        View<char> s;
-        const View<char> big = units[upt[-1]].str(parser);
-        const View<char> patt = parser.classes[in[rpt[-1]]].shorten(1,1);
-        if ((s = _butch_str_match(big, patt)).start)
-          rpt[-1] += _next(rpt[-1], units);
-        else
-        { // failure
-          if (rpt.len() > 0)
-            rpt.pop();
-        }
+        if (_butch_match_case_str(parser, rpt, upt, units, in))
+          return failure;
         break;
-        }
+      case Rule::ATOM_REGEX_MATCH:
+        // TODO
+        break;
     }
   }
 }
@@ -321,7 +371,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
     int j = i+1;
     while (j <= out.len())
     {
-      match = r.match(*this, out.slice(i, j-i));
+      match = r._sequence_match(*this, out.slice(i, j-i));
       if (match.matched)
       {
         out.insert(Unit(r.out, match.str_begin, match.str_len, j-i), i);
