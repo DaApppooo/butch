@@ -96,12 +96,35 @@ struct Unit
 
 struct Rule
 {
+  struct RulePt
+  { int pos; int depth; };
   struct MatchDescriptor
   {
     uint32_t str_begin;
     uint16_t str_len;
     bool matched;
+    bool include(MatchDescriptor m)
+    {
+      if (!m.matched)
+        return true;
+      if (m.str_len == 0)
+        return false;
+      if (m.str_begin < str_begin)
+      {
+        str_len += str_begin - m.str_begin;
+        str_begin = m.str_begin;
+      }
+      if (m.str_len > str_len)
+        str_len = m.str_len;
+      return false;
+    }
+    bool operator == (MatchDescriptor o)
+    { return o.matched == matched
+             && o.str_begin == str_begin
+             && o.str_len == str_len; }
   };
+  static constexpr MatchDescriptor PARTIAL_FAILURE = {0, 0, true};
+  static constexpr MatchDescriptor TOTAL_FAILURE = {0, 0, false};
   enum AtomType
   {
     ATOM_STRING_MATCH, // "string exact match"
@@ -124,7 +147,8 @@ struct Rule
     self.parent = NO_PARENT;
     return self;
   }
-  MatchDescriptor _sequence_match(Parser& parser, View<Unit> units);
+  MatchDescriptor _sequence_match(Parser&, View<Unit>);
+  MatchDescriptor _match_str(Parser&, View<Unit>, list<RulePt>&, list<int>&);
   void destroy()
   {
     delete[] in;

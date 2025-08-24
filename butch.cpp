@@ -272,46 +272,69 @@ View<char> _butch_str_match(View<char> big, View<char> pattern)
   return View<char>(nullptr, nullptr);
 }
 
-inline int _next(int start, View<Unit> units)
-{ return start+units[start].children_len; }
+inline void _next(int& start, View<Unit> units)
+{ start += units[start].children_len; }
 
-struct RulePt
-{ int pos; int depth; };
 
-bool _butch_failure(
-  list<RulePt>& 
+Rule::MatchDescriptor _butch_failure(
+  list<Rule::RulePt>& rpt,
+  list<int>& upt,
+  rule_id* in,
+  int rule_len
 ) {
-  
+  if (rpt.len() > 1)
+  {
+    rpt.pop();
+    return Rule::PARTIAL_FAILURE;
+  }
+  const int depth = rpt[-1].depth;
+  for (;;)
+  {
+    rpt[-1].pos++;
+    if (rpt[-1].pos >= rule_len)
+      return Rule::TOTAL_FAILURE;
+    if (in[rpt[-1].pos] == GROUP_END)
+      return Rule::TOTAL_FAILURE;
+    if (in[rpt[-1].pos] == PIPE)
+    { rpt[-1].pos++; return Rule::PARTIAL_FAILURE; }
+  }
 }
 
-bool _butch_match_case_str(
+Rule::MatchDescriptor Rule::_match_str(
   Parser& parser,
-  list<RulePt>& rpt,
-  list<int>& upt,
   View<Unit> units,
-  rule_id* in
+  list<RulePt>& rpt,
+  list<int>& upt
 ) {
   View<char> s;
   const View<char> big = units[upt[-1]].str(parser);
   const View<char> patt = parser.classes[in[rpt[-1].pos]].shorten(1,1);
   if ((s = _butch_str_match(big, patt)).start)
-    rpt[-1].pos += _next(rpt[-1].pos, units);
+  {
+    _next(rpt[-1].pos, units);
+    upt[-1]++;
+    return {units[upt[-1]].str_begin, units[upt[-1]].str_len, true};
+  }
   else
   { // failure
     if (rpt.len() > 1)
       rpt.pop();
     else
-      return _butch_failure();
+      return _butch_failure(rpt, upt, in, in_len);
   }
-  return false;
+  return Rule::TOTAL_FAILURE;
 }
 
 Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
 {
-  constexpr MatchDescriptor failure = {.matched=false};
+  constexpr MatchDescriptor failure = TOTAL_FAILURE;
   MatchDescriptor ret = {.str_begin = units[-1].str_end(), .str_len=0, .matched=true};
   list<RulePt> rpt; // rule pointer
   list<int> upt; // units pointer
+  rpt.init();
+  upt.init();
+  rpt.push({0, 0});
+  upt.push(0).push(0);
   /*
   How the algorithm works:
   Each (parenthesis) depth level is split in "sectors" (split by PIPE unit).
@@ -337,7 +360,7 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
     When a sector fails: upt[-1] = upt[-2].
     When a new depth level is entered: upt.push(upt[-1])
     When a depth level is exited: upt[-2] = upt[-1]; upt.pop()
-  
+
   */
   while (upt[-1] < units.len)
   {
@@ -348,14 +371,21 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
         break;
       case ATOM_CLASS:
         if (units[upt[-1]].id != in[rpt[-1].pos])
-          return failure;
+        {
+          if (_butch_failure(rpt, upt, in, in_len) == TOTAL_FAILURE)
+            return failure;
+        } else {
+          _next(rpt[-1].pos, units);
+          upt[-1]++;
+        }
         break;
       case ATOM_STRING_MATCH:
-        if (_butch_match_case_str(parser, rpt, upt, units, in))
+        if (ret.include(_match_str(parser, units, rpt, upt)))
           return failure;
         break;
       case Rule::ATOM_REGEX_MATCH:
-        // TODO
+        if (ret.include(_match_str(parser, units, rpt, upt)))
+          return failure;
         break;
     }
   }
