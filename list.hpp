@@ -608,7 +608,6 @@ GEN inline Self operator + (const Self a, const T&& obj)
 #undef Self
 #undef self
 
-/* Disable strings because we don't need them
 #include <cstdio>
 // NOTE - Using abreviation: Ld0 <=> Leading zero
 // NOTE - For strings,
@@ -616,6 +615,24 @@ GEN inline Self operator + (const Self a, const T&& obj)
 //  The cap doesn't count the Ld0
 #define Self list<char>
 #define self (*this)
+
+inline size_t str_len(const char* const s)
+{
+  if (s == nullptr) return 0;
+  if (*s == 0) return 0;
+  return strlen(s);
+}
+inline bool str_eq(const char* a, const char* b)
+{
+  if (a == b)
+    return true;
+  else if (a == nullptr || b == nullptr)
+    return false;
+  while (*a != 0 && *b != 0)
+    if (*(a++) != *(b++))
+      return false;
+  return *a == *b;
+}
 
 template <>
 class list<char>
@@ -661,7 +678,7 @@ public:
   inline Self& rmv(int index);
   inline View<T> to_view() const
   {
-    return View<T>{.start = _data, .len = len()};
+    return View<T>(_data, len());
   }
   Self& rmv_range(std::initializer_list<int> start_end);
   inline Self& clear();
@@ -835,7 +852,6 @@ inline bool operator != (string a, string b)
 #undef Self
 #undef self
 
-*/
 #endif /* H_LIST */
 
 

@@ -149,6 +149,7 @@ struct Rule
   }
   MatchDescriptor _sequence_match(Parser&, View<Unit>);
   MatchDescriptor _match_str(Parser&, View<Unit>, list<RulePt>&, list<int>&);
+  MatchDescriptor _match_rgx(Parser&, View<Unit>, list<RulePt>&, list<int>&);
   void destroy()
   {
     delete[] in;
@@ -176,12 +177,13 @@ struct Parser
   // writing linear dynamic array
   list<View<char>> classes;
   list<Rule> rules;
+  string buff;
 
   Parser() :
     butch_code(nullptr),
     classes(),
     rules()
-  { classes.init(); rules.init(); }
+  { classes.init(); rules.init(); buff.init(); }
 
   static Result<Own<Parser>, Error> read(Own<char*> s);
   static Result<Own<Parser>, Error> read_file(Ref<const char*> filename)
@@ -189,6 +191,8 @@ struct Parser
   void _make_rule(Rule& r, Ref<char*>& s);
   rule_id _find_or_make_class(View<char>);
   bool _check_and_do_rule(Rule& r, list<Unit>& out);
+  const char* _load_str(View<char> s);
+  View<char> _rgx_match(View<char> big, View<char> pattern);
   RulePack operator [] (int index)
   { return {classes[index], rules[index]}; }
   void debug(FILE* f);

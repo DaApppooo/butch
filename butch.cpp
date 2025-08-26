@@ -3,6 +3,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <regex>
+#include <string>
 // #include <regex>
 #include "butch.hpp"
 
@@ -262,12 +265,44 @@ void Parser::debug(FILE* f)
   }
 }
 
+const char* Parser::_load_str(View<char> s)
+{
+  if (buff._cap < s.len+1)
+    buff.prealloc(s.len+1);
+  memcpy(buff.data(), s.start, s.len);
+  buff[s.len] = 0;
+  return buff.data();
+}
+
 View<char> _butch_str_match(View<char> big, View<char> pattern)
 {
   for (int i = 0; i < big.len - pattern.len; i++)
   {
     if (memcmp(big.start+i, pattern.start, pattern.len) == 0)
       return {big.start+i, pattern.len};
+  }
+  return View<char>(nullptr, nullptr);
+}
+View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
+{
+  // WARN: C++ vomit ahead
+  using Match = std::match_results<char*, std::string::allocator_type>;
+  std::regex patt(pattern.start+1, pattern.start+pattern.len-2);
+  Match match;
+  if ((bool(*)(
+    char* __first, char* __last,
+    Match& m,
+    const std::basic_regex<char, std::regex_traits<char>>& e,
+    std::regex_constants::match_flag_type flags
+  ))(std::regex_search)(
+    big.start, big.start+big.len,
+    match,
+    patt
+  )) {
+    return View<char>(
+      (char*)&*match[0].str().begin(),
+      (char*)&*match[0].str().end()
+    );
   }
   return View<char>(nullptr, nullptr);
 }
@@ -317,10 +352,28 @@ Rule::MatchDescriptor Rule::_match_str(
   }
   else
   { // failure
-    if (rpt.len() > 1)
-      rpt.pop();
-    else
-      return _butch_failure(rpt, upt, in, in_len);
+    return _butch_failure(rpt, upt, in, in_len);
+  }
+  return Rule::TOTAL_FAILURE;
+}
+Rule::MatchDescriptor Rule::_match_rgx(
+  Parser& parser,
+  View<Unit> units,
+  list<RulePt>& rpt,
+  list<int>& upt
+) {
+  View<char> s;
+  const View<char> big = units[upt[-1]].str(parser);
+  const View<char> patt = parser.classes[in[rpt[-1].pos]].shorten(1,1);
+  if ((s = _butch_rgx_match(big, patt)).start)
+  {
+    _next(rpt[-1].pos, units);
+    upt[-1]++;
+    return {units[upt[-1]].str_begin, units[upt[-1]].str_len, true};
+  }
+  else
+  { // failure
+    return _butch_failure(rpt, upt, in, in_len);
   }
   return Rule::TOTAL_FAILURE;
 }
@@ -384,7 +437,7 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
           return failure;
         break;
       case Rule::ATOM_REGEX_MATCH:
-        if (ret.include(_match_str(parser, units, rpt, upt)))
+        if (ret.include(_match_rgx(parser, units, rpt, upt)))
           return failure;
         break;
     }
