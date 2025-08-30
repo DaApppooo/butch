@@ -3,7 +3,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
 #include <regex>
 #include <string>
 // #include <regex>
@@ -32,6 +31,11 @@ Own<char*> _butch_read_file(Ref<const char*> filename)
   while (*(++s) != str_char) \
     if (*s == '\\') \
       s++;
+
+View<char> Unit::str(Parser& p)
+{
+  return View<char>(p.parsed_code+str_begin, str_len);
+}
 
 Result<int,int> _butch_count_units(char* s)
 {
@@ -265,6 +269,33 @@ void Parser::debug(FILE* f)
   }
 }
 
+void Parser::debug_output(FILE* f, const list<Unit> ls)
+{
+  int8_t depth_pt = 0;
+  int32_t depth_stack[127];
+  for (int i = 0; i < ls.len(); i++)
+  {
+    const View<char> s = classes[rules[ls[i].id].out];
+    for (int j = 0; j < s.len; j++)
+      putc(s[j], f);
+    putc(' ', f);
+    if (ls[i].children_len > 0)
+    {
+      fprintf(f, "( ");
+      depth_stack[depth_pt++] = ls[i].children_len+1;
+    }
+    for (int j = depth_pt-1; j >= 0; j--)
+    {
+      depth_stack[j]--;
+      if (depth_stack[j] <= 0)
+      {
+        depth_pt--;
+        fprintf(f, ") ");
+      }
+    }
+  }
+}
+
 const char* Parser::_load_str(View<char> s)
 {
   if (buff._cap < s.len+1)
@@ -308,7 +339,7 @@ View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
 }
 
 inline void _next(int& start, View<Unit> units)
-{ start += units[start].children_len; }
+{ start += units[start].children_len+1; }
 
 
 Rule::MatchDescriptor _butch_failure(
@@ -346,8 +377,8 @@ Rule::MatchDescriptor Rule::_match_str(
   const View<char> patt = parser.classes[in[rpt[-1].pos]].shorten(1,1);
   if ((s = _butch_str_match(big, patt)).start)
   {
-    _next(rpt[-1].pos, units);
-    upt[-1]++;
+    rpt[-1].pos++;
+    _next(upt[-1], units);
     return {units[upt[-1]].str_begin, units[upt[-1]].str_len, true};
   }
   else
@@ -365,10 +396,10 @@ Rule::MatchDescriptor Rule::_match_rgx(
   View<char> s;
   const View<char> big = units[upt[-1]].str(parser);
   const View<char> patt = parser.classes[in[rpt[-1].pos]].shorten(1,1);
-  if ((s = _butch_rgx_match(big, patt)).start)
+  if ((s = parser._rgx_match(big, patt)).start)
   {
-    _next(rpt[-1].pos, units);
-    upt[-1]++;
+    rpt[-1].pos++;
+    _next(upt[-1], units);
     return {units[upt[-1]].str_begin, units[upt[-1]].str_len, true};
   }
   else
@@ -377,6 +408,8 @@ Rule::MatchDescriptor Rule::_match_rgx(
   }
   return Rule::TOTAL_FAILURE;
 }
+
+// TODO: check every _next for mistakes with swapping upt and rpt
 
 Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
 {
@@ -420,16 +453,57 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
     switch (parser.atom_type(in[rpt[-1].pos]))
     {
       case ATOM_SYMBOL:
-        assert(false); // TODO
+        switch (in[rpt[-1].pos])
+        {
+          case GROUP_BEGIN:
+            rpt[-1].depth++;
+            upt.push(upt[-1]);
+            break;
+          case PIPE:
+            while (in[rpt[-1].pos] != GROUP_END)
+              rpt[-1].pos++;
+            [[fallthrough]];
+          case GROUP_END:
+            rpt[-1].depth--;
+            upt[-2] = upt[-1];
+            upt.pop();
+            break;
+          case DOT:
+            break;
+          case PLUS:
+            if (in[rpt[-1].pos-1] == GROUP_END)
+            {
+              int p = rpt[-1].pos-2;
+              int depth = 0;
+              while (p > 0 && (in[p] != GROUP_BEGIN || depth != 0))
+              {
+                if (in[p] == GROUP_END)
+                  depth++;
+                else if (in[p] == GROUP_BEGIN)
+                  depth--;
+                p--;
+              }
+              const int loc_depth = rpt[-1].depth;
+              rpt.push({.pos=p, .depth=loc_depth});
+              rpt.swap(-1, -2);
+            }
+            else
+              rpt.push(rpt[-1]);
+              rpt[-2].pos--;
+            break;
+        }
+        rpt[-1].pos++;
         break;
       case ATOM_CLASS:
-        if (units[upt[-1]].id != in[rpt[-1].pos])
-        {
+        if (
+          units[upt[-1]].id != in[rpt[-1].pos]
+      &&  parser.rules[units[upt[-1]].id].parent == in[rpt[-1].pos]
+        ) {
           if (_butch_failure(rpt, upt, in, in_len) == TOTAL_FAILURE)
             return failure;
         } else {
-          _next(rpt[-1].pos, units);
-          upt[-1]++;
+          rpt[-1].pos++;
+          _next(upt[-1], units);
         }
         break;
       case ATOM_STRING_MATCH:
@@ -442,23 +516,94 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
         break;
     }
   }
+  return ret;
 }
 
+bool Parser::_is_to_be_trimmed(uint32_t begin, uint32_t len)
+{
+  if (!(flags & FLAG_TRIM_SPACE_LITERALS))
+    return false;
+  for (uint32_t i = 0; i < len; i++)
+  {
+    if (!isspace(parsed_code[begin+i]))
+      return false;
+  }
+  return true;
+}
 
 bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
 {
   Rule::MatchDescriptor match;
   bool did_something = false;
-  for (int i = 0; i < out.len()-1; i++)
-  {
-    int j = i+1;
-    while (j <= out.len())
+  Rule::AtomType atomt;
+
+  if (
+     r.in_len == 1
+  && ((atomt=atom_type(r.in[0])) == Rule::ATOM_REGEX_MATCH
+    || atomt == Rule::ATOM_STRING_MATCH)
+  ) {
+    // token
+    for (int i = 0; i < out.len(); _next(i, out.to_view()))
     {
-      match = r._sequence_match(*this, out.slice(i, j-i));
-      if (match.matched)
+      if (out[i].id == Unit::LITERAL)
       {
-        out.insert(Unit(r.out, match.str_begin, match.str_len, j-i), i);
-        did_something = true;
+        match = r._sequence_match(*this, out.slice(i, 1));
+        if (match.matched)
+        {
+          const uint32_t initial_length = out[i].str_len;
+          const uint32_t pre_len = match.str_begin - out[i].str_begin;
+          out[i].str_len = pre_len;
+          out.insert(Unit(r.out, match.str_begin, match.str_len, 0), i+1);
+          if (
+             initial_length - pre_len - match.str_len > 0
+          && !(_is_to_be_trimmed(
+                match.str_begin+match.str_len,
+                initial_length - pre_len - match.str_len
+              ))
+          ) {
+            out.insert(Unit(
+              Unit::LITERAL,
+              match.str_begin+match.str_len,
+              initial_length - pre_len - match.str_len,
+              0
+            ), i+2);
+          }
+          if (pre_len == 0 || _is_to_be_trimmed(out[i].str_begin, pre_len))
+            out.rmv(i);
+          did_something = true;
+        }
+      }
+    }
+  }
+  else if (r.parent == NO_PARENT)
+  {
+    // top-class abstract syntax node type
+    for (int i = 0; i < out.len()-1; _next(i, out.to_view()))
+    {
+      int j = i+1;
+      while (j <= out.len())
+      {
+        match = r._sequence_match(*this, out.slice(i, j-i));
+        if (match.matched)
+        {
+          out.insert(Unit(r.out, match.str_begin, match.str_len, j-i),i);
+          did_something = true;
+        }
+        _next(j, out.to_view());
+      }
+    }
+  } else {
+    // subclass
+    for (int i = 0; i < out.len(); _next(i, out.to_view()))
+    {
+      if (out[i].id == r.parent)
+      {
+        match = r._sequence_match(*this, out.slice(i+1, out[i].children_len));
+        if (match.matched)
+        {
+          out[i].id = r.out;
+          did_something = true;
+        }
       }
     }
   }
@@ -469,6 +614,7 @@ list<Unit> Parser::parse(Ref<char*> s)
 {
   list<Unit> out;
   out.init();
+  parsed_code = s;
 
   out.push(Unit(DOT, 0, strlen(s), 0));
 

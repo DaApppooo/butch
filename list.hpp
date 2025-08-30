@@ -33,7 +33,7 @@ struct View
   View(T* start, T* end) : start(start), len(end-start) {}
   View(const View<T>& v) : start(v.start), len(v.len) {}
   View(const View<T>&& v) : start(v.start), len(v.len) {}
-  T& operator [] (int index)
+  T& operator [] (int index) const
   { if (index < 0) index += len; return start[index]; }
   View<T>& operator = (const View<T>& v)
   { start = v.start; len = v.len; return *this; }
@@ -51,7 +51,7 @@ struct View<char>
   View(char* start, char* end) : start(start), len(end-start) {}
   View(const View<char>& v) : start(v.start), len(v.len) {}
   View(const View<char>&& v) : start(v.start), len(v.len) {}
-  char& operator [] (int index)
+  char& operator [] (int index) const
   { if (index < 0) index += len; return start[index]; }
   View<char>& operator = (const View<char>& v)
   { start = v.start; len = v.len; return *this; }
@@ -101,6 +101,7 @@ public:
   inline View<T> slice(int start, int len);
   Self& rmv_range(std::initializer_list<int> start_end);
   inline Self& clear();
+  inline Self& swap(int idx_a, int idx_b);
   inline Self& ref(const View<T>& other);
   inline Self& ref(const list<T>& other);
   inline Self& operator=(const list<T>& other);
@@ -446,6 +447,14 @@ GEN inline T list<T>::pop()
   return _data[_len - 1];
 }
 
+GEN inline Self& list<T>::swap(int a, int b)
+{
+  T temp = self[a];
+  self[a] = self[b];
+  self[b] = temp;
+  return self;
+}
+
 GEN inline Self& list<T>::realloc()
 {
   assertm(
@@ -616,7 +625,7 @@ GEN inline Self operator + (const Self a, const T&& obj)
 #define Self list<char>
 #define self (*this)
 
-inline size_t str_len(const char* const s)
+inline constexpr size_t str_len(const char* const s)
 {
   if (s == nullptr) return 0;
   if (*s == 0) return 0;

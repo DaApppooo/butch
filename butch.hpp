@@ -63,8 +63,8 @@ Result<Ok,Err> err(Err&& err_) { return Result<Ok, Err>(ERR, err_); }
   if (!(COND)) return err<OK_TYPE>(ERROR_CODE)
 
 
-typedef int16_t rule_id;
-typedef int16_t class_name_id;
+typedef int32_t rule_id;
+typedef int32_t class_name_id;
 constexpr rule_id GROUP_BEGIN = -1; // basically doing token-scale regex
 constexpr rule_id GROUP_END = -2;
 constexpr rule_id PLUS = -3;
@@ -76,19 +76,22 @@ template <class T> using Own = T;
 template <class T> using Ref = T;
 struct Unit
 {
+  static constexpr rule_id LITERAL = -1; // for Unit.id
   uint32_t str_begin;
   // number of children units following this unit in the output unit vector
   // representing a tree
   uint32_t children_len;
-  class_name_id id; // points to Parser.rules
-  uint16_t str_len;
+  rule_id id; // points to Parser.rules
+              // if id == LITERAL then this is unparsed code
+  uint32_t str_len;
   inline uint32_t str_end() const { return str_begin + str_len; }
   
   Unit() {}
-  Unit(uint16_t id, uint32_t begin, uint16_t len, int children_count)
+  Unit(class_name_id id, uint32_t begin, uint32_t len, uint32_t children_count)
     : str_begin(begin), id(id), str_len(len), children_len(children_count) {}
   Unit(const Unit& u) : str_begin(u.str_begin), id(u.id), str_len(u.str_len) {}
-  Unit(const Unit&& u) : str_begin(u.str_begin), id(u.id), str_len(u.str_len) {}
+  Unit(const Unit&& u)
+    : str_begin(u.str_begin), id(u.id), str_len(u.str_len) {}
 
   View<char> str(Parser&);
   Unit& child(Parser&);
@@ -101,8 +104,8 @@ struct Rule
   struct MatchDescriptor
   {
     uint32_t str_begin;
-    uint16_t str_len;
-    bool matched;
+    uint32_t str_len : 31;
+    bool matched : 1;
     bool include(MatchDescriptor m)
     {
       if (!m.matched)
@@ -159,8 +162,25 @@ struct Rule
 Own<char*> _butch_read_file(Ref<const char*> filename);
 Result<int,int> _butch_count_units(char* s);
 
+/*
+== The Butch Parser ==
+Create with (both return a valid Parser structure):
+  Parser::read(Own<char*> butch_code) : give code (with ownership) directly.
+  Parser::read_file(Ref<const char*> butch_file)
+    : open, read and calls Parser::read.
+Use the parser to parse your custom language with:
+  Parser.parse(Ref<char*> code)
+    : Returns a tree with a linear layout in memoy in a list (eqv.
+      std::vector). Each node is a 'Unit', and has Unit.child_count elements.
+  Parser.parse_file(Ref<const char*> filename)
+    : Returns a Parser::FileParse containing a string with the content of the
+      opened file (can be used to retrieve the content of tokens for example),
+      and the list tree as explained with Parser.parse
+*/
 struct Parser
 {
+  static constexpr int FLAG_TRIM_SPACE_LITERALS = 0b0001;
+  // static constexpr int FLAG_ALL // TODO add more flags
   struct Error
   {
     enum Type {
@@ -170,6 +190,11 @@ struct Parser
     } type;
     uint32_t offset;
   };
+  struct FileParse
+  {
+    Own<char*> parsed_code;
+    Own<list<Unit>> units;
+  };
   struct RulePack
   { View<char> class_name; Rule rule; };
   char* butch_code;
@@ -178,6 +203,9 @@ struct Parser
   list<View<char>> classes;
   list<Rule> rules;
   string buff;
+  Ref<char*> parsed_code;
+  int flags;
+  int flags_data;
 
   Parser() :
     butch_code(nullptr),
@@ -193,16 +221,17 @@ struct Parser
   bool _check_and_do_rule(Rule& r, list<Unit>& out);
   const char* _load_str(View<char> s);
   View<char> _rgx_match(View<char> big, View<char> pattern);
+  bool _is_to_be_trimmed(uint32_t begin, uint32_t len);
   RulePack operator [] (int index)
   { return {classes[index], rules[index]}; }
   void debug(FILE* f);
+  void debug_output(FILE* f, const list<Unit> ls);
   Own<list<Unit>> parse(Ref<char*> s);
-  Own<list<Unit>> parse_file(Ref<const char*> filename)
+  FileParse parse_file(Ref<const char*> filename)
   {
     char* code = _butch_read_file(filename);
     auto ret = parse(code);
-    free(code);
-    return ret;
+    return {code, ret};
   }
   Rule::AtomType atom_type(rule_id in)
   {
