@@ -194,7 +194,7 @@ GEN inline Self& list<T>::clear()
 }
 GEN inline View<T> list<T>::slice(int start, int len)
 {
-  return View<T>{.start=_data+start, .len=len};
+  return View<T>(_data+start, len);
 }
 GEN inline size_t list<T>::cap() const { return _cap; }
 GEN inline T* list<T>::data() const { return _data; }
@@ -435,14 +435,14 @@ GEN Self& list<T>::rmv_range(std::initializer_list<int> start_end)
 
 GEN inline View<T> list<T>::to_view() const
 {
-  return View<T>{.start = _data, .len = len()};
+  return View<T>(_data, len());
 }
 
 // Object is not destroyed !!!
 GEN inline T list<T>::pop()
 {
   const size_t _len = len();
-  assertm(_len > 0, "You tried to pop an empty list !");
+  assertm(_len > 0, "You tried to pop an empty list!\n");
   FETCH_LEN() = _len - 1;
   return _data[_len - 1];
 }
@@ -460,7 +460,7 @@ GEN inline Self& list<T>::realloc()
   assertm(
       _cap == 0,
       "[MEMCHECK] You tried to realloc a list, but it was already allocated "
-      "and you forgot to destroy it !"
+      "and you forgot to destroy it !\n"
   );
   return self.force_realloc();
 }
@@ -491,7 +491,7 @@ GEN inline Self& list<T>::ref(const View<T>& other)
   assertm(
       _cap == 0,
       "[MEMCHECK] You tried to reference a list, but you forgot to destroy it "
-      "! (1)"
+      "! (1)\n"
   );
   _data = other.start;
   _cap = 0;
@@ -503,7 +503,7 @@ GEN inline Self& list<T>::ref(const list<T>& other)
   assertm(
       _cap == 0,
       "[MEMCHECK] You tried to reference a list, but you forgot to destroy it "
-      "! (2)"
+      "! (2)\n"
   );
   _data = other._data;
   _cap = 0;
@@ -523,7 +523,7 @@ GEN inline Self& list<T>::operator=(std::initializer_list<T> init_ls)
   assertm(
       _cap == 0,
       "[MEMCHECK] You tried to assign to a list, but you forgot to destroy it "
-      "! (with an initializer list)"
+      "! (with an initializer list)\n"
   ) _data
       = (T*)poff(
           malloc(sizeof(T) * init_ls.size() + sizeof(size_t)),
@@ -542,7 +542,11 @@ GEN T& list<T>::operator[](const int index) const
     return _data[_len + index];
   }
 #ifdef DEBUG
-  assertm(0 <= index && index < _len, "list out of bound access");
+  assertm(0 <= index && index < _len,
+          "list out of bound access with index %i (len=%i)\n",
+          index,
+          (int)_len
+  );
 #endif
   return _data[index];
 }

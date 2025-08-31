@@ -87,31 +87,34 @@ void Parser::_make_rule(Rule& r, char*& s)
     {
       start = s;
       SKIP_STRING('"')
-      r.in[i++] = _find_or_make_class(View(start, ++s));
+      r.in_rule(Rule::STRING);
+      r.in_class(i++) = _find_or_make_class(View(start, ++s));
     }
     else if (*s == '\'')
     {
       start = s;
       SKIP_STRING('\'')
-      r.in[i++] = _find_or_make_class(View(start, ++s));
+      r.in_rule(Rule::REGEX);
+      r.in_class(i++) = _find_or_make_class(View(start, ++s));
     }
     else
     {
       switch (*s)
       {
         case '(':
-          r.in[i++] = GROUP_BEGIN; s++; break;
+          r.in_rule(i++) = Rule::GROUP_BEGIN; s++; break;
         case ')':
-          r.in[i++] = GROUP_END; s++; break;
+          r.in_rule(i++) = Rule::GROUP_END; s++; break;
         case '.':
-          r.in[i++] = DOT; s++; break;
+          r.in_rule(i++) = Rule::DOT; s++; break;
         case '+':
-          r.in[i++] = PLUS; s++; break;
+          r.in_rule(i++) = Rule::PLUS; s++; break;
         default:
           start = s;
           while (!isspace(*s) && *s != '\n')
             s++;
-          r.in[i++] = _find_or_make_class(View(start, s));
+          r.in_class(i) = _find_or_make_class(View(start, s));
+          r.in_rule(i) = _find_rule(r.in_class(i));
           break;
       }
     }
@@ -121,7 +124,7 @@ void Parser::_make_rule(Rule& r, char*& s)
     while (*s != 0 && *s != '\n') s++;
 }
 
-rule_id Parser::_find_or_make_class(View<char> s)
+class_name_id Parser::_find_or_make_class(View<char> s)
 {
   for (int i = 0; i < classes.len(); i++)
   {
@@ -135,6 +138,15 @@ rule_id Parser::_find_or_make_class(View<char> s)
   return classes.len()-1;
 }
 
+rule_id Parser::_find_rule(class_name_id class_name)
+{
+  for (int i = 0; i < rules.len(); i++)
+  {
+    if (rules[i].out == class_name)
+      return i;
+  }
+  return Rule::UNKNOWN_RULE;
+}
 
 Result<Parser, Parser::Error> Parser::read(Own<char*> s)
 {
@@ -215,6 +227,22 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     if (*s == '\n')
       s++;
   }
+
+  // resolve rules with Rule.in_rule(x) == UNKNOWN_RULE
+  for (uint32_t i = 0; i < self.rules.len(); i++)
+  {
+    Rule& r = self.rules[i];
+    for (int j = 0; j < r.in_len; j++)
+    {
+      if (r.in_rule(j) == Rule::UNKNOWN_RULE)
+      {
+        const rule_id find_test = self._find_rule(r.in_class(j));
+        if (find_test == Rule::UNKNOWN_RULE)
+          return err<Parser>(Error{Error::UNDECLARED_RULE, i});
+        r.in_rule(j) = find_test;
+      }
+    }
+  }
   
   return ok<Error>(self);
 }
@@ -232,7 +260,7 @@ void Parser::debug(FILE* f)
   fprintf(f, "=== Rules ===\n");
   for (Rule& r : rules)
   {
-    if (r.parent != NO_PARENT)
+    if (r.parent != Rule::NO_PARENT)
     {
       c = classes[r.parent].fix();
       fprintf(f, "%s/", classes[r.parent].start);
@@ -243,26 +271,26 @@ void Parser::debug(FILE* f)
     classes[r.out].mov(c);
     for (int i = 0; i < r.in_len; i++)
     {
-      if (r.in[i] < 0)
+      if (r.in_rule(i) < 0 && r.in_rule(i) > Rule::STRING)
       {
         const char* p = nullptr;
-        switch (r.in[i])
+        switch (r.in_rule(i))
         {
-          case GROUP_BEGIN: p = " ("; break;
-          case GROUP_END: p = " )"; break;
-          case PLUS: p = " +"; break;
-          case DOT: p = " ."; break;
-          case PIPE: p = " |"; break;
+          case Rule::GROUP_BEGIN: p = " ("; break;
+          case Rule::GROUP_END: p = " )"; break;
+          case Rule::PLUS: p = " +"; break;
+          case Rule::DOT: p = " ."; break;
+          case Rule::PIPE: p = " |"; break;
           default:
-            fprintf(f, "<??? %i \?\?\?>", r.in[i]);
+            fprintf(f, "<??? %i \?\?\?>", r.in_rule(i));
             assert(!"Unknown symbol token.");
             break;
         }
         fprintf(f, "%s", p);
       } else {
-        c = classes[r.in[i]].fix();
-        fprintf(f, " %s", classes[r.in[i]].start);
-        classes[r.in[i]].mov(c);
+        c = classes[r.in_class(i)].fix();
+        fprintf(f, " %s", classes[r.in_class(i)].start);
+        classes[r.in_class(i)].mov(c);
       }
     }
     fprintf(f, "\n");
@@ -275,7 +303,9 @@ void Parser::debug_output(FILE* f, const list<Unit> ls)
   int32_t depth_stack[127];
   for (int i = 0; i < ls.len(); i++)
   {
-    const View<char> s = classes[rules[ls[i].id].out];
+    const View<char> s =
+      ls[i].id == Unit::LITERAL ? ls[i].str(*this)
+                                : classes[rules[ls[i].id].out];
     for (int j = 0; j < s.len; j++)
       putc(s[j], f);
     putc(' ', f);
@@ -359,9 +389,9 @@ Rule::MatchDescriptor _butch_failure(
     rpt[-1].pos++;
     if (rpt[-1].pos >= rule_len)
       return Rule::TOTAL_FAILURE;
-    if (in[rpt[-1].pos] == GROUP_END)
+    if (in[rpt[-1].pos] == Rule::GROUP_END)
       return Rule::TOTAL_FAILURE;
-    if (in[rpt[-1].pos] == PIPE)
+    if (in[rpt[-1].pos] == Rule::PIPE)
     { rpt[-1].pos++; return Rule::PARTIAL_FAILURE; }
   }
 }
@@ -374,7 +404,7 @@ Rule::MatchDescriptor Rule::_match_str(
 ) {
   View<char> s;
   const View<char> big = units[upt[-1]].str(parser);
-  const View<char> patt = parser.classes[in[rpt[-1].pos]].shorten(1,1);
+  const View<char> patt = parser.classes[in_class(rpt[-1].pos)].shorten(1,1);
   if ((s = _butch_str_match(big, patt)).start)
   {
     rpt[-1].pos++;
@@ -383,19 +413,19 @@ Rule::MatchDescriptor Rule::_match_str(
   }
   else
   { // failure
-    return _butch_failure(rpt, upt, in, in_len);
+    return _butch_failure(rpt, upt, in_rules, in_len);
   }
   return Rule::TOTAL_FAILURE;
 }
 Rule::MatchDescriptor Rule::_match_rgx(
   Parser& parser,
   View<Unit> units,
-  list<RulePt>& rpt,
+  list<int>& rpt,
   list<int>& upt
 ) {
   View<char> s;
   const View<char> big = units[upt[-1]].str(parser);
-  const View<char> patt = parser.classes[in[rpt[-1].pos]].shorten(1,1);
+  const View<char> patt = parser.classes[in_class(rpt[-1])].shorten(1,1);
   if ((s = parser._rgx_match(big, patt)).start)
   {
     rpt[-1].pos++;
@@ -404,23 +434,18 @@ Rule::MatchDescriptor Rule::_match_rgx(
   }
   else
   { // failure
-    return _butch_failure(rpt, upt, in, in_len);
+    return _butch_failure(rpt, upt, in_rules, in_len);
   }
   return Rule::TOTAL_FAILURE;
 }
-
-// TODO: check every _next for mistakes with swapping upt and rpt
 
 Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
 {
   constexpr MatchDescriptor failure = TOTAL_FAILURE;
   MatchDescriptor ret = {.str_begin = units[-1].str_end(), .str_len=0, .matched=true};
-  list<RulePt> rpt; // rule pointer
-  list<int> upt; // units pointer
-  rpt.init();
-  upt.init();
-  rpt.push({0, 0});
-  upt.push(0).push(0);
+  list<RulePt> u;
+  u.init();
+  u.push({0, 0}).push({0, 0});
   /*
   How the algorithm works:
   Each (parenthesis) depth level is split in "sectors" (split by PIPE unit).
@@ -448,71 +473,76 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
     When a depth level is exited: upt[-2] = upt[-1]; upt.pop()
 
   */
-  while (upt[-1] < units.len)
+  while (u[-1].r < in_len && u[])
   {
-    switch (parser.atom_type(in[rpt[-1].pos]))
+    switch (in_rule(rpt[-1]))
     {
-      case ATOM_SYMBOL:
-        switch (in[rpt[-1].pos])
+      case GROUP_BEGIN:
+        upt.push(upt[-1]);
+        rpt[-1]++;
+        break;
+      case PIPE:
         {
-          case GROUP_BEGIN:
-            rpt[-1].depth++;
-            upt.push(upt[-1]);
-            break;
-          case PIPE:
-            while (in[rpt[-1].pos] != GROUP_END)
-              rpt[-1].pos++;
-            [[fallthrough]];
-          case GROUP_END:
-            rpt[-1].depth--;
-            upt[-2] = upt[-1];
-            upt.pop();
-            break;
-          case DOT:
-            break;
-          case PLUS:
-            if (in[rpt[-1].pos-1] == GROUP_END)
-            {
-              int p = rpt[-1].pos-2;
-              int depth = 0;
-              while (p > 0 && (in[p] != GROUP_BEGIN || depth != 0))
-              {
-                if (in[p] == GROUP_END)
-                  depth++;
-                else if (in[p] == GROUP_BEGIN)
-                  depth--;
-                p--;
-              }
-              const int loc_depth = rpt[-1].depth;
-              rpt.push({.pos=p, .depth=loc_depth});
-              rpt.swap(-1, -2);
-            }
-            else
-              rpt.push(rpt[-1]);
-              rpt[-2].pos--;
-            break;
+        int depth = 0;
+        rpt.push(rpt[-1]+1);
+        while (in_rule(rpt[-1]) != GROUP_END || depth > 0)
+        {
+          if (in_rule(rpt[-1]) == GROUP_BEGIN)
+            depth++;
+          if (in_rule(rpt[-1]) == GROUP_END)
+            depth--;
+          rpt[-1]++;
         }
-        rpt[-1].pos++;
-        break;
-      case ATOM_CLASS:
-        if (
-          units[upt[-1]].id != in[rpt[-1].pos]
-      &&  parser.rules[units[upt[-1]].id].parent == in[rpt[-1].pos]
-        ) {
-          if (_butch_failure(rpt, upt, in, in_len) == TOTAL_FAILURE)
-            return failure;
-        } else {
-          rpt[-1].pos++;
-          _next(upt[-1], units);
+        [[fallthrough]];
         }
+      case GROUP_END:
+        upt[-2] = upt[-1];
+        upt.pop();
+        rpt[-1]++;
         break;
-      case ATOM_STRING_MATCH:
+      case DOT:
+        rpt[-1]++;
+        break;
+      case PLUS:
+        if (in_rule(rpt[-1]-1) == GROUP_END)
+        {
+          int p = rpt[-1]-2;
+          int depth = 0;
+          while (p > 0 && (in_rule(p) != GROUP_BEGIN || depth != 0))
+          {
+            if (in_rule(p) == GROUP_END)
+              depth++;
+            else if (in_rule(p) == GROUP_BEGIN)
+              depth--;
+            p--;
+          }
+          rpt.push(p);
+          rpt.swap(-1, -2);
+        }
+        else
+          rpt.push(rpt[-1]);
+          rpt[-2]--;
+        rpt[-1]++;
+        break;
+      case STRING:
         if (ret.include(_match_str(parser, units, rpt, upt)))
           return failure;
         break;
-      case Rule::ATOM_REGEX_MATCH:
+      case REGEX:
         if (ret.include(_match_rgx(parser, units, rpt, upt)))
           return failure;
+        break;
+      default:
+        if (
+          units[upt[-1]].id != in_rule(rpt[-1])
+      &&  parser.rules[units[upt[-1]].id].parent == in_rule(rpt[-1])
+        ) {
+          if (_butch_failure(rpt, upt, in_rules, in_len) == TOTAL_FAILURE)
+            return failure;
+        } else {
+          rpt[-1]++;
+          _next(upt[-1], units);
+        }
         break;
     }
   }
@@ -616,7 +646,7 @@ list<Unit> Parser::parse(Ref<char*> s)
   out.init();
   parsed_code = s;
 
-  out.push(Unit(DOT, 0, strlen(s), 0));
+  out.push(Unit(Unit::LITERAL, 0, str_len(s), 0));
 
   for (;;)
   {

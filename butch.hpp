@@ -65,12 +65,6 @@ Result<Ok,Err> err(Err&& err_) { return Result<Ok, Err>(ERR, err_); }
 
 typedef int32_t rule_id;
 typedef int32_t class_name_id;
-constexpr rule_id GROUP_BEGIN = -1; // basically doing token-scale regex
-constexpr rule_id GROUP_END = -2;
-constexpr rule_id PLUS = -3;
-constexpr rule_id DOT = -4;
-constexpr rule_id PIPE = -5;
-constexpr class_name_id NO_PARENT = -1;
 struct Parser;
 template <class T> using Own = T;
 template <class T> using Ref = T;
@@ -89,18 +83,39 @@ struct Unit
   Unit() {}
   Unit(class_name_id id, uint32_t begin, uint32_t len, uint32_t children_count)
     : str_begin(begin), id(id), str_len(len), children_len(children_count) {}
-  Unit(const Unit& u) : str_begin(u.str_begin), id(u.id), str_len(u.str_len) {}
+  Unit(const Unit& u)
+    : str_begin(u.str_begin), id(u.id), str_len(u.str_len),
+      children_len(u.children_len) {}
   Unit(const Unit&& u)
-    : str_begin(u.str_begin), id(u.id), str_len(u.str_len) {}
+    : str_begin(u.str_begin), id(u.id), str_len(u.str_len),
+      children_len(u.children_len) {}
+  constexpr Unit& operator = (const Unit& u)
+  { str_begin=u.str_begin; id=u.id; str_len=u.str_len;
+    children_len=u.children_len; return *this; }
+  constexpr Unit& operator = (const Unit&& u)
+  { str_begin=u.str_begin; id=u.id; str_len=u.str_len;
+    children_len=u.children_len; return *this; }
 
   View<char> str(Parser&);
   Unit& child(Parser&);
 };
 
+struct RulePt
+{ int r; int u; };
 struct Rule
 {
-  struct RulePt
-  { int pos; int depth; };
+  // basically doing token-scale regex
+  static constexpr rule_id GROUP_BEGIN = -1;
+  static constexpr rule_id GROUP_END = -2;
+  static constexpr rule_id PLUS = -3;
+  static constexpr rule_id DOT = -4;
+  static constexpr rule_id PIPE = -5;
+  
+  static constexpr rule_id STRING = -10;
+  static constexpr rule_id REGEX = -11;
+  static constexpr rule_id UNKNOWN_RULE = -12;
+
+  static constexpr class_name_id NO_PARENT = -1;
   struct MatchDescriptor
   {
     uint32_t str_begin;
@@ -128,34 +143,34 @@ struct Rule
   };
   static constexpr MatchDescriptor PARTIAL_FAILURE = {0, 0, true};
   static constexpr MatchDescriptor TOTAL_FAILURE = {0, 0, false};
-  enum AtomType
-  {
-    ATOM_STRING_MATCH, // "string exact match"
-    ATOM_REGEX_MATCH, // 'regex expression'
-    ATOM_SYMBOL, // regex operators ( | + * . )
-    ATOM_CLASS // class name
-  };
   uint32_t in_len;
   class_name_id parent; // parent class with 'Parent/Child' syntax
                         // useful for precision parsing.
                         // (use a global class for all of cases and for one
                         // specific case use a child class)
   class_name_id out;
-  rule_id* in;
+  rule_id* in_rules;
+  class_name_id* in_class_names;
   static Rule init(uint32_t input_count)
   {
     Rule self;
     self.in_len = input_count;
-    self.in = new rule_id[input_count];
+    self.in_rules = new rule_id[input_count];
+    self.in_class_names = new class_name_id[input_count];
     self.parent = NO_PARENT;
     return self;
   }
+  rule_id& in_rule(int index)
+  { return in_rules[index]; }
+  class_name_id& in_class(int index)
+  { return in_class_names[index]; }
   MatchDescriptor _sequence_match(Parser&, View<Unit>);
-  MatchDescriptor _match_str(Parser&, View<Unit>, list<RulePt>&, list<int>&);
-  MatchDescriptor _match_rgx(Parser&, View<Unit>, list<RulePt>&, list<int>&);
+  MatchDescriptor _match_str(Parser&, View<Unit>, list<int>&, list<int>&);
+  MatchDescriptor _match_rgx(Parser&, View<Unit>, list<int>&, list<int>&);
   void destroy()
   {
-    delete[] in;
+    delete[] in_rules;
+    delete[] in_class_names;
   }
 };
 
@@ -186,7 +201,10 @@ struct Parser
     enum Type {
       DOUBLE_QUOTE_MISMATCH,
       SINGLE_QUOTE_MISMATCH,
-      CANT_OPEN_FILE
+      CANT_OPEN_FILE,
+      UNDECLARED_RULE // offset is index in rules
+      // comments talking like baba is you blocks
+      // i should do this more often. it's fun
     } type;
     uint32_t offset;
   };
@@ -217,7 +235,8 @@ struct Parser
   static Result<Own<Parser>, Error> read_file(Ref<const char*> filename)
   { return Parser::read(_butch_read_file(filename)); }
   void _make_rule(Rule& r, Ref<char*>& s);
-  rule_id _find_or_make_class(View<char>);
+  class_name_id _find_or_make_class(View<char>);
+  rule_id _find_rule(class_name_id s);
   bool _check_and_do_rule(Rule& r, list<Unit>& out);
   const char* _load_str(View<char> s);
   View<char> _rgx_match(View<char> big, View<char> pattern);
@@ -230,16 +249,14 @@ struct Parser
   FileParse parse_file(Ref<const char*> filename)
   {
     char* code = _butch_read_file(filename);
+    if (code == nullptr)
+    {
+      list<Unit> err;
+      err.init();
+      return {nullptr, err};
+    }
     auto ret = parse(code);
     return {code, ret};
-  }
-  Rule::AtomType atom_type(rule_id in)
-  {
-    if (in < 0) return Rule::ATOM_SYMBOL;
-    const char* const s = classes[in].start;
-    if (*s == '"') return Rule::ATOM_STRING_MATCH;
-    if (*s == '\'') return Rule::ATOM_REGEX_MATCH;
-    return Rule::ATOM_CLASS;
   }
   void destroy()
   {

@@ -1,4 +1,5 @@
 
 A = "A"
 B = "B"
-As = "A" +
+As = A +
+ABs = (A | A B) C

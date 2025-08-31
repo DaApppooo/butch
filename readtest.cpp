@@ -2,9 +2,9 @@
 
 int main(int argc, const char** argv)
 {
-  if (argc == 1)
+  if (argc < 3)
   {
-    fprintf(stderr, "Syntax: readtest <file>\n");
+    fprintf(stderr, "Syntax: readtest <butch_file> <file_to_parse>\n");
     return 1;
   }
   auto res = Parser::read_file(argv[1]);
@@ -26,6 +26,14 @@ int main(int argc, const char** argv)
   }
   auto& p = res.ok;
   p.debug(stdout);
+  Parser::FileParse fp = p.parse_file(argv[2]);
+  if (fp.parsed_code == nullptr)
+  {
+    fprintf(stderr, "Failed to open file_to_parse: '%s'\n", argv[2]);
+    return 1;
+  }
+  p.debug_output(stdout, fp.units);
+  free(fp.parsed_code);
   p.destroy();
   return 0;
 }
