@@ -100,10 +100,10 @@ struct Unit
   Unit& child(Parser&);
 };
 
-struct RulePt
-{ int r; int u; };
 struct Rule
 {
+  struct RulePt
+  { int r; int u; };
   // basically doing token-scale regex
   static constexpr rule_id GROUP_BEGIN = -1;
   static constexpr rule_id GROUP_END = -2;
@@ -165,8 +165,8 @@ struct Rule
   class_name_id& in_class(int index)
   { return in_class_names[index]; }
   MatchDescriptor _sequence_match(Parser&, View<Unit>);
-  MatchDescriptor _match_str(Parser&, View<Unit>, list<int>&, list<int>&);
-  MatchDescriptor _match_rgx(Parser&, View<Unit>, list<int>&, list<int>&);
+  MatchDescriptor _match_str(Parser&, View<Unit>, list<RulePt>&);
+  MatchDescriptor _match_rgx(Parser&, View<Unit>, list<RulePt>&);
   void destroy()
   {
     delete[] in_rules;

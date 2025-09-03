@@ -87,14 +87,14 @@ void Parser::_make_rule(Rule& r, char*& s)
     {
       start = s;
       SKIP_STRING('"')
-      r.in_rule(Rule::STRING);
+      r.in_rule(i) = Rule::STRING;
       r.in_class(i++) = _find_or_make_class(View(start, ++s));
     }
     else if (*s == '\'')
     {
       start = s;
       SKIP_STRING('\'')
-      r.in_rule(Rule::REGEX);
+      r.in_rule(i) = Rule::REGEX;
       r.in_class(i++) = _find_or_make_class(View(start, ++s));
     }
     else
@@ -258,8 +258,10 @@ void Parser::debug(FILE* f)
     t.mov(c);
   }
   fprintf(f, "=== Rules ===\n");
+  int i = 0;
   for (Rule& r : rules)
   {
+    fprintf(f, "%04i ", i++);
     if (r.parent != Rule::NO_PARENT)
     {
       c = classes[r.parent].fix();
@@ -292,6 +294,7 @@ void Parser::debug(FILE* f)
         fprintf(f, " %s", classes[r.in_class(i)].start);
         classes[r.in_class(i)].mov(c);
       }
+      fprintf(f, " [%i]", r.in_rule(i));
     }
     fprintf(f, "\n");
   }
@@ -306,8 +309,13 @@ void Parser::debug_output(FILE* f, const list<Unit> ls)
     const View<char> s =
       ls[i].id == Unit::LITERAL ? ls[i].str(*this)
                                 : classes[rules[ls[i].id].out];
+    fprintf(f, "[%i+%i]", int(s.start-parsed_code), s.len);
+    if (ls[i].id == Unit::LITERAL)
+      putc('"', f);
     for (int j = 0; j < s.len; j++)
       putc(s[j], f);
+    if (ls[i].id == Unit::LITERAL)
+      putc('"', f);
     putc(' ', f);
     if (ls[i].children_len > 0)
     {
@@ -324,6 +332,7 @@ void Parser::debug_output(FILE* f, const list<Unit> ls)
       }
     }
   }
+  putc('\n', f);
 }
 
 const char* Parser::_load_str(View<char> s)
@@ -373,68 +382,84 @@ inline void _next(int& start, View<Unit> units)
 
 
 Rule::MatchDescriptor _butch_failure(
-  list<Rule::RulePt>& rpt,
-  list<int>& upt,
+  list<Rule::RulePt>& u,
   rule_id* in,
   int rule_len
 ) {
-  if (rpt.len() > 1)
+  int m = -1, depth;
+  while (m < 0)
   {
-    rpt.pop();
-    return Rule::PARTIAL_FAILURE;
+    m = u[-1].r;
+    depth = 0;
+    while (in[m] != Rule::PIPE || depth > 0)
+    {
+      if (in[m] == Rule::GROUP_BEGIN)
+        depth++;
+      else if (in[m] == Rule::GROUP_END)
+        depth--;
+      m++;
+      if (m >= rule_len || (in[m] == Rule::GROUP_END && depth == 0))
+      {
+        m = -1; // failed to find a new m
+        break;
+      }
+    }
+    if (m == -1)
+    {
+      if (u.len() > 2)
+      {
+        u[-2] = u[-1];
+        u.pop();
+      }
+      else
+        return Rule::TOTAL_FAILURE;
+    }
+    else
+    {
+      u[-2].r = u[-1].r = m+1;
+      u[-1].u = u[-2].u;
+    }
   }
-  const int depth = rpt[-1].depth;
-  for (;;)
-  {
-    rpt[-1].pos++;
-    if (rpt[-1].pos >= rule_len)
-      return Rule::TOTAL_FAILURE;
-    if (in[rpt[-1].pos] == Rule::GROUP_END)
-      return Rule::TOTAL_FAILURE;
-    if (in[rpt[-1].pos] == Rule::PIPE)
-    { rpt[-1].pos++; return Rule::PARTIAL_FAILURE; }
-  }
+  return Rule::PARTIAL_FAILURE;
 }
 
 Rule::MatchDescriptor Rule::_match_str(
   Parser& parser,
   View<Unit> units,
-  list<RulePt>& rpt,
-  list<int>& upt
+  list<RulePt>& u
 ) {
   View<char> s;
-  const View<char> big = units[upt[-1]].str(parser);
-  const View<char> patt = parser.classes[in_class(rpt[-1].pos)].shorten(1,1);
+  const View<char> big = units[u[-1].u].str(parser);
+  const View<char> patt = parser.classes[in_class(u[-1].r)].shorten(1,1);
   if ((s = _butch_str_match(big, patt)).start)
   {
-    rpt[-1].pos++;
-    _next(upt[-1], units);
-    return {units[upt[-1]].str_begin, units[upt[-1]].str_len, true};
+    u[-1].r++;
+    _next(u[-1].u, units);
+    return {uint32_t(s.start - parser.parsed_code), s.len, true};
   }
   else
   { // failure
-    return _butch_failure(rpt, upt, in_rules, in_len);
+    return _butch_failure(u, in_rules, in_len);
   }
   return Rule::TOTAL_FAILURE;
 }
 Rule::MatchDescriptor Rule::_match_rgx(
   Parser& parser,
   View<Unit> units,
-  list<int>& rpt,
-  list<int>& upt
+  list<RulePt>& u
 ) {
   View<char> s;
-  const View<char> big = units[upt[-1]].str(parser);
-  const View<char> patt = parser.classes[in_class(rpt[-1])].shorten(1,1);
+  const View<char> big = units[u[-1].u].str(parser);
+  const View<char> patt = parser.classes[in_class(u[-1].r)].shorten(1,1);
   if ((s = parser._rgx_match(big, patt)).start)
   {
-    rpt[-1].pos++;
-    _next(upt[-1], units);
-    return {units[upt[-1]].str_begin, units[upt[-1]].str_len, true};
+    u[-1].r++;
+    _next(u[-1].u, units);
+    return {uint32_t(s.start - parser.parsed_code), s.len, true};
   }
   else
   { // failure
-    return _butch_failure(rpt, upt, in_rules, in_len);
+    return _butch_failure(u, in_rules, in_len);
   }
   return Rule::TOTAL_FAILURE;
 }
@@ -446,106 +471,81 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
   list<RulePt> u;
   u.init();
   u.push({0, 0}).push({0, 0});
-  /*
-  How the algorithm works:
-  Each (parenthesis) depth level is split in "sectors" (split by PIPE unit).
-  Each sector is a sequence that could potentially match.
-  rpt stack stores options before sector failure (sector failure means one element in the sequence did not match)
-    When an element fails to match:
-      If rpt.len() > 1: rpt.pop()
-      Else: skip until next sector with the same depth (triggers sector failure in 'upt' conditional section)
-        If GROUP_END is reached, then: return failure
-    When a PIPE is reached: skip until next unit after GROUP_END of current depth
-    When a PLUS is reached:
-      If units[rpt[-1]-1] is GROUP_END:
-        find GROUP_BEGIN with same depth at 'position';
-        rpt.push(position);
-        rpt.swap(-1,-2);
-        rpt[-1] += (next)
-      Else:
-        rpt.push(rpt[-1]);
-        rpt[-2]--;
-        rpt[-1] += (next)
-    When a DOT is reached: rpt[-1] += (next)
-  upt stack stores start of each depth:
-    When a sector fails: upt[-1] = upt[-2].
-    When a new depth level is entered: upt.push(upt[-1])
-    When a depth level is exited: upt[-2] = upt[-1]; upt.pop()
-
-  */
-  while (u[-1].r < in_len && u[])
+  while (u[-1].r < in_len && u[-1].u < units.len)
   {
-    switch (in_rule(rpt[-1]))
+    switch (in_rule(u[-1].r))
     {
       case GROUP_BEGIN:
-        upt.push(upt[-1]);
-        rpt[-1]++;
+        u[-1].r++;
+        u.push(u[-1]);
         break;
       case PIPE:
         {
         int depth = 0;
-        rpt.push(rpt[-1]+1);
-        while (in_rule(rpt[-1]) != GROUP_END || depth > 0)
+        u.push({.r=u[-1].r+1, .u=u[-2].u});
+        while ((in_rule(u[-1].r) != GROUP_END || depth > 0) && u[-1].r < in_len)
         {
-          if (in_rule(rpt[-1]) == GROUP_BEGIN)
+          if (in_rule(u[-1].r) == GROUP_BEGIN)
             depth++;
-          if (in_rule(rpt[-1]) == GROUP_END)
+          if (in_rule(u[-1].r) == GROUP_END)
             depth--;
-          rpt[-1]++;
+          u[-1].r++;
         }
         [[fallthrough]];
         }
       case GROUP_END:
-        upt[-2] = upt[-1];
-        upt.pop();
-        rpt[-1]++;
+        u[-1].r++;
         break;
       case DOT:
-        rpt[-1]++;
+        u[-1].r++;
+        _next(u[-1].u, units);
         break;
       case PLUS:
-        if (in_rule(rpt[-1]-1) == GROUP_END)
         {
-          int p = rpt[-1]-2;
-          int depth = 0;
-          while (p > 0 && (in_rule(p) != GROUP_BEGIN || depth != 0))
+          int p;
+          if (in_rule(u[-1].r-1) == GROUP_END)
           {
-            if (in_rule(p) == GROUP_END)
-              depth++;
-            else if (in_rule(p) == GROUP_BEGIN)
-              depth--;
-            p--;
+            p = u[-1].r-2;
+            int depth = 0;
+            while (p > 0 && (in_rule(p) != GROUP_BEGIN || depth != 0))
+            {
+              if (in_rule(p) == GROUP_END)
+                depth++;
+              else if (in_rule(p) == GROUP_BEGIN)
+                depth--;
+              p--;
+            }
           }
-          rpt.push(p);
-          rpt.swap(-1, -2);
+          else
+            p = u[-1].r-1;
+          u.push({.r=p, .u=u[-1].u});
+          u.swap(-1, -2);
+          break;
         }
-        else
-          rpt.push(rpt[-1]);
-          rpt[-2]--;
-        rpt[-1]++;
-        break;
       case STRING:
-        if (ret.include(_match_str(parser, units, rpt, upt)))
+        if (ret.include(_match_str(parser, units, u)))
           return failure;
         break;
       case REGEX:
-        if (ret.include(_match_rgx(parser, units, rpt, upt)))
+        if (ret.include(_match_rgx(parser, units, u)))
           return failure;
         break;
       default:
         if (
-          units[upt[-1]].id != in_rule(rpt[-1])
-      &&  parser.rules[units[upt[-1]].id].parent == in_rule(rpt[-1])
+          units[u[-1].u].id != in_rule(u[-1].r)
+      &&  parser.rules[units[u[-1].r].id].parent == in_rule(u[-1].r)
         ) {
-          if (_butch_failure(rpt, upt, in_rules, in_len) == TOTAL_FAILURE)
+          if (_butch_failure(u, in_rules, in_len) == TOTAL_FAILURE)
             return failure;
         } else {
-          rpt[-1]++;
-          _next(upt[-1], units);
+          u[-1].r++;
+          _next(u[-1].u, units);
         }
         break;
     }
   }
+  if (u[-1].r < in_len || u[-1].u < units.len)
+    return failure;
   return ret;
 }
 
@@ -565,12 +565,11 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
 {
   Rule::MatchDescriptor match;
   bool did_something = false;
-  Rule::AtomType atomt;
 
   if (
      r.in_len == 1
-  && ((atomt=atom_type(r.in[0])) == Rule::ATOM_REGEX_MATCH
-    || atomt == Rule::ATOM_STRING_MATCH)
+  && (r.in_rule(0) == Rule::REGEX
+    || r.in_rule(0) == Rule::STRING)
   ) {
     // token
     for (int i = 0; i < out.len(); _next(i, out.to_view()))
@@ -583,7 +582,9 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
           const uint32_t initial_length = out[i].str_len;
           const uint32_t pre_len = match.str_begin - out[i].str_begin;
           out[i].str_len = pre_len;
+          debug_output(stdout, out);
           out.insert(Unit(r.out, match.str_begin, match.str_len, 0), i+1);
+          debug_output(stdout, out);
           if (
              initial_length - pre_len - match.str_len > 0
           && !(_is_to_be_trimmed(
@@ -598,14 +599,16 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
               0
             ), i+2);
           }
+          debug_output(stdout, out);
           if (pre_len == 0 || _is_to_be_trimmed(out[i].str_begin, pre_len))
             out.rmv(i);
+          debug_output(stdout, out);
           did_something = true;
         }
       }
     }
   }
-  else if (r.parent == NO_PARENT)
+  else if (r.parent == Rule::NO_PARENT)
   {
     // top-class abstract syntax node type
     for (int i = 0; i < out.len()-1; _next(i, out.to_view()))

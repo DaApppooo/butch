@@ -1,5 +1,3 @@
 
 A = "A"
 B = "B"
-As = A +
-ABs = (A | A B) C
