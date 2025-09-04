@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,6 +22,14 @@ Own<char*> _butch_read_file(Ref<const char*> filename)
     fclose(f);
     s[len] = 0;
     return s;
+}
+
+Own<char*> _butch_allocpy_view(const View<char> v)
+{
+  char* ret = (char*)malloc(v.len+1);
+  memcpy(ret, v.start, v.len);
+  ret[v.len] = 0;
+  return ret;
 }
 
 #define SKIP_SPACES_ONLY \
@@ -115,6 +124,7 @@ void Parser::_make_rule(Rule& r, char*& s)
             s++;
           r.in_class(i) = _find_or_make_class(View(start, s));
           r.in_rule(i) = _find_rule(r.in_class(i));
+          i++;
           break;
       }
     }
@@ -238,7 +248,10 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       {
         const rule_id find_test = self._find_rule(r.in_class(j));
         if (find_test == Rule::UNKNOWN_RULE)
-          return err<Parser>(Error{Error::UNDECLARED_RULE, i});
+          return err<Parser>(Error{
+            .type=Error::UNDECLARED_RULE,
+            .name=_butch_allocpy_view(self.classes[r.in_class(j)])
+          });
         r.in_rule(j) = find_test;
       }
     }
@@ -300,16 +313,16 @@ void Parser::debug(FILE* f)
   }
 }
 
-void Parser::debug_output(FILE* f, const list<Unit> ls)
+void Parser::debug_output(FILE* f, const View<Unit> ls)
 {
   int8_t depth_pt = 0;
   int32_t depth_stack[127];
-  for (int i = 0; i < ls.len(); i++)
+  for (int i = 0; i < ls.len; i++)
   {
     const View<char> s =
       ls[i].id == Unit::LITERAL ? ls[i].str(*this)
                                 : classes[rules[ls[i].id].out];
-    fprintf(f, "[%i+%i]", int(s.start-parsed_code), s.len);
+    fprintf(f, "[%u+%u]", ls[i].str_begin, ls[i].str_len);
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
     for (int j = 0; j < s.len; j++)
@@ -349,7 +362,9 @@ View<char> _butch_str_match(View<char> big, View<char> pattern)
   for (int i = 0; i < big.len - pattern.len; i++)
   {
     if (memcmp(big.start+i, pattern.start, pattern.len) == 0)
+    {
       return {big.start+i, pattern.len};
+    }
   }
   return View<char>(nullptr, nullptr);
 }
@@ -370,8 +385,8 @@ View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
     patt
   )) {
     return View<char>(
-      (char*)&*match[0].str().begin(),
-      (char*)&*match[0].str().end()
+      (match[0].first),
+      (match[0].second)
     );
   }
   return View<char>(nullptr, nullptr);
@@ -532,8 +547,8 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
         break;
       default:
         if (
-          units[u[-1].u].id != in_rule(u[-1].r)
-      &&  parser.rules[units[u[-1].r].id].parent == in_rule(u[-1].r)
+           units[u[-1].u].id != in_rule(u[-1].r)
+        || parser.rules[units[u[-1].r].id].parent == in_rule(u[-1].r)
         ) {
           if (_butch_failure(u, in_rules, in_len) == TOTAL_FAILURE)
             return failure;
@@ -565,6 +580,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
 {
   Rule::MatchDescriptor match;
   bool did_something = false;
+  const uint32_t rule_idx = &r - rules.data();
 
   if (
      r.in_len == 1
@@ -582,9 +598,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
           const uint32_t initial_length = out[i].str_len;
           const uint32_t pre_len = match.str_begin - out[i].str_begin;
           out[i].str_len = pre_len;
-          debug_output(stdout, out);
-          out.insert(Unit(r.out, match.str_begin, match.str_len, 0), i+1);
-          debug_output(stdout, out);
+          out.insert(Unit(rule_idx, match.str_begin, match.str_len, 0), i+1);
           if (
              initial_length - pre_len - match.str_len > 0
           && !(_is_to_be_trimmed(
@@ -599,10 +613,9 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
               0
             ), i+2);
           }
-          debug_output(stdout, out);
           if (pre_len == 0 || _is_to_be_trimmed(out[i].str_begin, pre_len))
             out.rmv(i);
-          debug_output(stdout, out);
+          debug_output(stdout, out.to_view());
           did_something = true;
         }
       }
@@ -619,7 +632,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
         match = r._sequence_match(*this, out.slice(i, j-i));
         if (match.matched)
         {
-          out.insert(Unit(r.out, match.str_begin, match.str_len, j-i),i);
+          out.insert(Unit(rule_idx, match.str_begin, match.str_len, j-i),i);
           did_something = true;
         }
         _next(j, out.to_view());
@@ -634,8 +647,9 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
         match = r._sequence_match(*this, out.slice(i+1, out[i].children_len));
         if (match.matched)
         {
-          out[i].id = r.out;
+          out[i].id = rule_idx;
           did_something = true;
+          assert(false); // TODO
         }
       }
     }

@@ -127,6 +127,8 @@ struct Rule
         return true;
       if (m.str_len == 0)
         return false;
+      if (str_len == 0)
+      { *this = m; return false; }
       if (m.str_begin < str_begin)
       {
         str_len += str_begin - m.str_begin;
@@ -199,14 +201,12 @@ struct Parser
   struct Error
   {
     enum Type {
-      DOUBLE_QUOTE_MISMATCH,
-      SINGLE_QUOTE_MISMATCH,
+      DOUBLE_QUOTE_MISMATCH, // .offset
+      SINGLE_QUOTE_MISMATCH, // .offset
       CANT_OPEN_FILE,
-      UNDECLARED_RULE // offset is index in rules
-      // comments talking like baba is you blocks
-      // i should do this more often. it's fun
+      UNDECLARED_RULE // .name
     } type;
-    uint32_t offset;
+    union { uint32_t offset; Own<char*> name; };
   };
   struct FileParse
   {
@@ -228,7 +228,10 @@ struct Parser
   Parser() :
     butch_code(nullptr),
     classes(),
-    rules()
+    rules(),
+    parsed_code(nullptr),
+    flags(FLAG_TRIM_SPACE_LITERALS),
+    flags_data(0)
   { classes.init(); rules.init(); buff.init(); }
 
   static Result<Own<Parser>, Error> read(Own<char*> s);
@@ -244,7 +247,7 @@ struct Parser
   RulePack operator [] (int index)
   { return {classes[index], rules[index]}; }
   void debug(FILE* f);
-  void debug_output(FILE* f, const list<Unit> ls);
+  void debug_output(FILE* f, const View<Unit> ls);
   Own<list<Unit>> parse(Ref<char*> s);
   FileParse parse_file(Ref<const char*> filename)
   {

@@ -21,6 +21,13 @@ int main(int argc, const char** argv)
       case Parser::Error::SINGLE_QUOTE_MISMATCH:
         fprintf(stderr, "Single quote mismatch at char %i\n", res.err.offset);
         break;
+      case Parser::Error::UNDECLARED_RULE:
+        fprintf(stderr,
+                "Unknown class name: '%s'\n",
+                res.err.name
+        );
+        free(res.err.name);
+        break;
     }
     return 1;
   }
@@ -32,7 +39,7 @@ int main(int argc, const char** argv)
     fprintf(stderr, "Failed to open file_to_parse: '%s'\n", argv[2]);
     return 1;
   }
-  p.debug_output(stdout, fp.units);
+  p.debug_output(stdout, fp.units.to_view());
   free(fp.parsed_code);
   p.destroy();
   return 0;
