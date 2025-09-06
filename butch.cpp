@@ -4,8 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <regex>
-#include <string>
+#include <regex.h>
 // #include <regex>
 #include "butch.hpp"
 
@@ -350,11 +349,41 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
 
 const char* Parser::_load_str(View<char> s)
 {
+  assert(s.len > 0); // undefined behavior otherwise
   if (buff._cap < s.len+1)
     buff.prealloc(s.len+1);
   memcpy(buff.data(), s.start, s.len);
   buff[s.len] = 0;
   return buff.data();
+}
+
+const char* Parser::_comp_str(View<char> s)
+{
+  _load_str(s);
+  int off = 0;
+  const int len = buff.len();
+  for (int i = 0; i < len-off; i++)
+  {
+    if (i == len-off-1)
+    { buff[i] = buff[i+off]; break; }
+    if (buff[i+off] == '\\')
+    {
+      switch (buff[i+off+1])
+      {
+        case 'n': buff[i] = '\n'; break;
+        case 't': buff[i] = '\t'; break;
+        case 'e': buff[i] = '\e'; break;
+        case 'r': buff[i] = '\r'; break;
+        case 'a': buff[i] = '\a'; break;
+        case 'x':
+          if (i >= len-off-4)
+          { buff[i] = buff[i+off]; off--; }
+          else
+          {  }
+      }
+      off++;
+    }
+  }
 }
 
 View<char> _butch_str_match(View<char> big, View<char> pattern)
@@ -370,31 +399,28 @@ View<char> _butch_str_match(View<char> big, View<char> pattern)
 }
 View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
 {
-  // WARN: C++ vomit ahead
-  using Match = std::match_results<char*, std::string::allocator_type>;
-  std::regex patt(pattern.start+1, pattern.start+pattern.len-2);
-  Match match;
-  if ((bool(*)(
-    char* __first, char* __last,
-    Match& m,
-    const std::basic_regex<char, std::regex_traits<char>>& e,
-    std::regex_constants::match_flag_type flags
-  ))(std::regex_search)(
-    big.start, big.start+big.len,
-    match,
-    patt
-  )) {
-    return View<char>(
-      (match[0].first),
-      (match[0].second)
-    );
+  constexpr View<char> failed = View<char>(nullptr, nullptr);
+  regex_t patt;
+  int res;
+  regmatch_t match;
+  const char* const cstr_patt = _comp_str(pattern);
+  res = regcomp(&patt, cstr_patt, REG_EXTENDED);
+  if (res)
+  {
+    buff.prealloc(256);
+    regerror(res, &patt, buff.data(), buff._cap);
+    fprintf(stderr, "WARN: Failure to compile regex '%s': %s\n",
+            cstr_patt, buff.data());
+    return failed;
   }
-  return View<char>(nullptr, nullptr);
+  res = regexec(&patt, _load_str(big), 1, &match, 0);
+  if (!res)
+    return View<char>(big.start+match.rm_so, big.start+match.rm_eo);
+  return failed;
 }
 
 inline void _next(int& start, View<Unit> units)
 { start += units[start].children_len+1; }
-
 
 Rule::MatchDescriptor _butch_failure(
   list<Rule::RulePt>& u,

@@ -28,11 +28,11 @@ struct View
 {
   using mut_T = std::remove_const<T>;
   T* start; uint32_t len;
-  View() {}
-  View(T* start, uint32_t len) : start(start), len(len) {}
-  View(T* start, T* end) : start(start), len(end-start) {}
-  View(const View<T>& v) : start(v.start), len(v.len) {}
-  View(const View<T>&& v) : start(v.start), len(v.len) {}
+  constexpr View() : start(nullptr), len(0) {}
+  constexpr View(T* start, uint32_t len) : start(start), len(len) {}
+  constexpr View(T* start, T* end) : start(start), len(end-start) {}
+  constexpr View(const View<T>& v) : start(v.start), len(v.len) {}
+  constexpr View(const View<T>&& v) : start(v.start), len(v.len) {}
   T& operator [] (int index) const
   { if (index < 0) index += len; return start[index]; }
   View<T>& operator = (const View<T>& v)
@@ -46,11 +46,11 @@ template <>
 struct View<char>
 {
   char* start; uint32_t len;
-  View() {}
-  View(char* start, uint32_t len) : start(start), len(len) {}
-  View(char* start, char* end) : start(start), len(end-start) {}
-  View(const View<char>& v) : start(v.start), len(v.len) {}
-  View(const View<char>&& v) : start(v.start), len(v.len) {}
+  constexpr View() : start(nullptr), len(0) {}
+  constexpr View(char* start, uint32_t len) : start(start), len(len) {}
+  constexpr View(char* start, char* end) : start(start), len(end-start) {}
+  constexpr View(const View<char>& v) : start(v.start), len(v.len) {}
+  constexpr View(const View<char>&& v) : start(v.start), len(v.len) {}
   char& operator [] (int index) const
   { if (index < 0) index += len; return start[index]; }
   View<char>& operator = (const View<char>& v)

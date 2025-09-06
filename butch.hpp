@@ -241,7 +241,10 @@ struct Parser
   class_name_id _find_or_make_class(View<char>);
   rule_id _find_rule(class_name_id s);
   bool _check_and_do_rule(Rule& r, list<Unit>& out);
+  // just loads [s.start, s.start+s.len[ U {0} into buff
   const char* _load_str(View<char> s);
+  // same as _load but transforms "\\n" into "\n"
+  const char* _comp_str(View<char> s);
   View<char> _rgx_match(View<char> big, View<char> pattern);
   bool _is_to_be_trimmed(uint32_t begin, uint32_t len);
   RulePack operator [] (int index)
