@@ -1,6 +1,13 @@
 
-
+Int = '-?[0-9]+'
+OpsPrec2 = '(\+|-)'
+OpsPrec3 = "="
 Name = '\w+'
 StatementEnd = ";"
-Decl = Name Name
 
+Decl = Name Name
+Atom = Name | Int | Operation
+OpxPrec2 = Atom OpsPrec2 Atom
+OpxPrec3 = Atom OpsPrec3 Atom
+Operation = OpxPrec2 | OpxPrec3
+Statement = ( Decl | Operation ) StatementEnd

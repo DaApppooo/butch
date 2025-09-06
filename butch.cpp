@@ -71,6 +71,7 @@ Result<int,int> _butch_count_units(char* s)
         case '.':
         case '*':
         case '+':
+        case '|':
           input_count++; s++;
           break;
         default:
@@ -117,6 +118,8 @@ void Parser::_make_rule(Rule& r, char*& s)
           r.in_rule(i++) = Rule::DOT; s++; break;
         case '+':
           r.in_rule(i++) = Rule::PLUS; s++; break;
+        case '|':
+          r.in_rule(i++) = Rule::PIPE; s++; break;
         default:
           start = s;
           while (!isspace(*s) && *s != '\n')
@@ -318,10 +321,11 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
   int32_t depth_stack[127];
   for (int i = 0; i < ls.len; i++)
   {
+    for (int j = 0; j < depth_pt; j++)
+      fprintf(f, "  ");
     const View<char> s =
       ls[i].id == Unit::LITERAL ? ls[i].str(*this)
                                 : classes[rules[ls[i].id].out];
-    fprintf(f, "[%u+%u]", ls[i].str_begin, ls[i].str_len);
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
     for (int j = 0; j < s.len; j++)
@@ -329,9 +333,9 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
     putc(' ', f);
+    fprintf(f, "[%i:+%i]\n", ls[i].str_begin, ls[i].str_len);
     if (ls[i].children_len > 0)
     {
-      fprintf(f, "( ");
       depth_stack[depth_pt++] = ls[i].children_len+1;
     }
     for (int j = depth_pt-1; j >= 0; j--)
@@ -340,11 +344,9 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
       if (depth_stack[j] <= 0)
       {
         depth_pt--;
-        fprintf(f, ") ");
       }
     }
   }
-  putc('\n', f);
 }
 
 const char* Parser::_load_str(View<char> s)
@@ -353,14 +355,33 @@ const char* Parser::_load_str(View<char> s)
   if (buff._cap < s.len+1)
     buff.prealloc(s.len+1);
   memcpy(buff.data(), s.start, s.len);
-  buff[s.len] = 0;
+  buff.data()[s.len] = 0;
   return buff.data();
+}
+
+int _butch_hex2byte(const char* const p)
+{
+  int res = 0;
+  for (int i = 0; i < 2; i++)
+  {
+    const char c= *(p+i);
+    if ('0' <= c && c <= '9')
+    { res |= (c - '0')<<(4*(1-i)); }
+    else if ('a' <= c && c <= 'f')
+    { res |= (c - 'a' + 10)<<(4*(1-i)); }
+    else if ('A' <= c && c <= 'F')
+    { res |= (c - 'A' + 10)<<(4*(1-i)); }
+    else
+      return -1;
+  }
+  return res;
 }
 
 const char* Parser::_comp_str(View<char> s)
 {
   _load_str(s);
   int off = 0;
+  int suc;
   const int len = buff.len();
   for (int i = 0; i < len-off; i++)
   {
@@ -379,11 +400,25 @@ const char* Parser::_comp_str(View<char> s)
           if (i >= len-off-4)
           { buff[i] = buff[i+off]; off--; }
           else
-          {  }
+          {
+            if ((suc = _butch_hex2byte(buff.data()+i+off+2)) >= 0)
+            {
+              buff[i] = suc;
+              off += 2;
+            }
+            else { buff[i] = buff[i+off]; off--; }
+          }
+        default:
+          buff[i] = buff[i+off];
+          off--;
       }
       off++;
     }
+    else
+      buff[i] = buff[i+off];
   }
+  buff.data()[len-off] = 0;
+  return buff.data();
 }
 
 View<char> _butch_str_match(View<char> big, View<char> pattern)
@@ -403,7 +438,7 @@ View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
   regex_t patt;
   int res;
   regmatch_t match;
-  const char* const cstr_patt = _comp_str(pattern);
+  const char* const cstr_patt = _load_str(pattern);
   res = regcomp(&patt, cstr_patt, REG_EXTENDED);
   if (res)
   {
@@ -414,6 +449,7 @@ View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
     return failed;
   }
   res = regexec(&patt, _load_str(big), 1, &match, 0);
+  regfree(&patt);
   if (!res)
     return View<char>(big.start+match.rm_so, big.start+match.rm_eo);
   return failed;
@@ -641,7 +677,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
           }
           if (pre_len == 0 || _is_to_be_trimmed(out[i].str_begin, pre_len))
             out.rmv(i);
-          debug_output(stdout, out.to_view());
+          // debug_output(stdout, out.to_view());
           did_something = true;
         }
       }
@@ -652,7 +688,8 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
     // top-class abstract syntax node type
     for (int i = 0; i < out.len()-1; _next(i, out.to_view()))
     {
-      int j = i+1;
+      int j = i;
+      _next(j, out.to_view());
       while (j <= out.len())
       {
         match = r._sequence_match(*this, out.slice(i, j-i));

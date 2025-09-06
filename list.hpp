@@ -804,15 +804,32 @@ inline char list<char>::pop() {
 }
 
 inline Self& list<char>::prealloc(size_t size) {
+  const size_t _len = len();
+  if (size <= _cap)
+    return self;
   if (is_owned())
   {
-  	const size_t _len = len();
-  	assertm(_cap == 0 && _len == 0, "List is already set: cannot prealloc.");
-	}
-	_cap = size;
-	_data = (char*)malloc(sizeof(char)*(_cap+1));
-	memset(_data, 0, sizeof(char)*(_cap+1));
-	return self;
+    _cap = size;
+    _data = (char*)::realloc(
+      _data,
+      sizeof(T) * (_cap+1)
+    );
+  }
+  else
+  {
+    const void* old = _data;
+    _cap = size;
+    _data = (char*)malloc(sizeof(char) * (_cap+1));
+    if (old)
+      memcpy(
+        poff(_data, -sizeof(size_t)),
+        poff(old, -sizeof(size_t)),
+        sizeof(T)*_len + sizeof(size_t)
+      );
+    else
+      _data[0] = 0;
+  }
+  return self;
 }
 
 inline Self& list<char>::force_realloc() {
