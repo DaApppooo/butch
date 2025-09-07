@@ -28,6 +28,13 @@ int main(int argc, const char** argv)
         );
         free(res.err.name);
         break;
+      case Parser::Error::MISPLACED_PLUS:
+        fprintf(stderr,
+        "Misplaced '+' (must not be placed first) in rule named: '%s'\n",
+                res.err.name
+        );
+        free(res.err.name);
+        break;
     }
     return 1;
   }

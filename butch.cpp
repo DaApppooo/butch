@@ -4,10 +4,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <regex.h>
 // #include <regex>
 #include "butch.hpp"
 
+#define ALIAS_CHAR '?'
 
 Own<char*> _butch_read_file(Ref<const char*> filename)
 {
@@ -40,7 +42,7 @@ Own<char*> _butch_allocpy_view(const View<char> v)
     if (*s == '\\') \
       s++;
 
-View<char> Unit::str(Parser& p)
+View<char> Unit::str(const Parser& p)
 {
   return View<char>(p.parsed_code+str_begin, str_len);
 }
@@ -244,6 +246,11 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   for (uint32_t i = 0; i < self.rules.len(); i++)
   {
     Rule& r = self.rules[i];
+    if (r.in_rule(0) == Rule::PLUS)
+      return err<Parser>(Error{
+       .type=Error::MISPLACED_PLUS,
+       .name=_butch_allocpy_view(self.classes[r.out])
+      });
     for (int j = 0; j < r.in_len; j++)
     {
       if (r.in_rule(j) == Rule::UNKNOWN_RULE)
@@ -309,10 +316,42 @@ void Parser::debug(FILE* f)
         fprintf(f, " %s", classes[r.in_class(i)].start);
         classes[r.in_class(i)].mov(c);
       }
-      fprintf(f, " [%i]", r.in_rule(i));
+      if (r.in_rule(i) >= 0)
+        fprintf(f, " [%i]", r.in_rule(i));
     }
     fprintf(f, "\n");
   }
+}
+
+bool _butch_alias_match(const Parser& p, const Rule& alias, const Unit& u)
+{
+  for (int i = 0; i < alias.in_len; i++)
+  {
+    if (alias.in_rule(i) == u.id)
+      return true;
+    else if (*p.classes[alias.in_class(i)].start == ALIAS_CHAR)
+      if (_butch_alias_match(p, p.rules[alias.in_rule(i)], u))
+        return true;
+  }
+  return false;
+}
+
+bool Unit::is(const Parser& p, const View<char> s)
+{
+  if (s.start == nullptr) return false;
+  if (id == LITERAL) return false;
+  Rule* r = nullptr;
+  rule_id rid;
+  for (int i = 0; i < p.rules.len(); i++)
+  {
+    if (p.classes[p.rules[i].out] == s)
+    { r = p.rules.data() + i; rid = i; break; }
+  }
+  if (!r) return false;
+  if (*s.start == ALIAS_CHAR)
+    return _butch_alias_match(p, *r, *this);
+  else
+    return id == rid || p.rules[id].parent == rid;
 }
 
 void Parser::debug_output(FILE* f, const View<Unit> ls)
@@ -544,12 +583,19 @@ Rule::MatchDescriptor Rule::_match_rgx(
 Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
 {
   constexpr MatchDescriptor failure = TOTAL_FAILURE;
+  const std::function<void()> util = [&]() { parser.debug_output(stdout, units); };
   MatchDescriptor ret = {.str_begin = units[-1].str_end(), .str_len=0, .matched=true};
   list<RulePt> u;
   u.init();
   u.push({0, 0}).push({0, 0});
   while (u[-1].r < in_len && u[-1].u < units.len)
   {
+    printf(">>> Rule '%s': |u|=%lu u[-1]={.r=%i,.u=%i}\n",
+      parser._load_str(parser.classes[out]),
+      u.len(),
+      u[-1].r,
+      u[-1].u
+    );
     switch (in_rule(u[-1].r))
     {
       case GROUP_BEGIN:
@@ -559,7 +605,8 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
       case PIPE:
         {
         int depth = 0;
-        u.push({.r=u[-1].r+1, .u=u[-2].u});
+        u[-1].r++;
+        u[-2].r = u[-1].r;
         while ((in_rule(u[-1].r) != GROUP_END || depth > 0) && u[-1].r < in_len)
         {
           if (in_rule(u[-1].r) == GROUP_BEGIN)
@@ -608,9 +655,24 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
           return failure;
         break;
       default:
-        if (
+        if (*parser.classes[in_class(u[-1].r)].start == ALIAS_CHAR)
+        { // aliases
+          
+          if (_butch_alias_match(
+            parser,
+            parser.rules[u[-1].r],
+            units[u[-1].u]
+          )) {
+            u[-1].r++;
+            _next(u[-1].u, units);
+          }
+          else
+            if (_butch_failure(u, in_rules, in_len) == TOTAL_FAILURE)
+              return failure;
+        }
+        else if (
            units[u[-1].u].id != in_rule(u[-1].r)
-        || parser.rules[units[u[-1].r].id].parent == in_rule(u[-1].r)
+        || parser.rules[units[u[-1].u].id].parent == in_rule(u[-1].r)
         ) {
           if (_butch_failure(u, in_rules, in_len) == TOTAL_FAILURE)
             return failure;
@@ -644,7 +706,9 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
   bool did_something = false;
   const uint32_t rule_idx = &r - rules.data();
 
-  if (
+  if (*classes[r.out].start == ALIAS_CHAR)
+    return false; // this is an alias
+  else if (
      r.in_len == 1
   && (r.in_rule(0) == Rule::REGEX
     || r.in_rule(0) == Rule::STRING)
@@ -697,6 +761,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
         {
           out.insert(Unit(rule_idx, match.str_begin, match.str_len, j-i),i);
           did_something = true;
+          debug_output(stdout, out.to_view());
         }
         _next(j, out.to_view());
       }

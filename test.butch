@@ -1,13 +1,34 @@
 
 Int = '-?[0-9]+'
-OpsPrec2 = '(\+|-)'
-OpsPrec3 = "="
 Name = '\w+'
 StatementEnd = ";"
 
-Decl = Name Name
-Atom = Name | Int | Operation
-OpxPrec2 = Atom OpsPrec2 Atom
-OpxPrec3 = Atom OpsPrec3 Atom
-Operation = OpxPrec2 | OpxPrec3
-Statement = ( Decl | Operation ) StatementEnd
+# Operators
+Incr = "++"
+Decr = "--"
+Mul = "*"
+Div = "/"
+Add = "+"
+Sub = "-"
+Assign = "="
+
+# Operator precedences
+?OpcPrec1 = Incr Decr
+?OpcPrec2 = Mul Div
+?OpcPrec3 = Add Sub
+?OpcPrec4 = Assign
+
+
+?Atom = Int Name VarDecl ?Operation
+?Operation = OpPrec1 OpPrec2 OpPrec3 OpPrec4
+
+VarDecl = Name Name
+
+# Operations
+OpPrec1 = ?Atom ?OpcPrec1 ?Atom
+OpPrec2 = ?Atom ?OpcPrec2 ?Atom
+OpPrec3 = ?Atom ?OpcPrec3 ?Atom
+OpPrec4 = ?Atom ?OpcPrec4 ?Atom
+
+?StatementStart = VarDecl ?Operation
+Statement = ?StatementStart StatementEnd

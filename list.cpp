@@ -1,7 +1,11 @@
 #include "list.hpp"
 
+size_t list<char>::len() const {
+	return str_len(_data);
+}
+
 list<char> list<char>::copy() const {
-	const isize _len = len();
+	const size_t _len = len();
 	list<char> ret;
 	ret.init();
 	ret.prealloc(_len);
@@ -12,7 +16,7 @@ list<char> list<char>::copy() const {
 
 list<char>& list<char>::extend(View<char> ref_ext)
 {
-	isize _len = len();
+	size_t _len = len();
 	_len+=ref_ext.len;
 	if (_len > _cap) {
 		if (_cap == 0 || _data == NULL) {
@@ -37,7 +41,7 @@ list<char>& list<char>::extend(View<char> ref_ext)
 
 list<char>& list<char>::prextend(View<char> ref_ext)
 {
-	isize _len = len();
+	size_t _len = len();
 	_len+=ref_ext.len;
 	if (_len > _cap) {
 		if (_cap == 0 || _data == NULL) {
@@ -61,9 +65,9 @@ list<char>& list<char>::prextend(View<char> ref_ext)
 	return *this;
 }
 
-list<char>& list<char>::rmv_range([[maybe_unused]] std::initializer_list<index_t> start_end) {
-	todo();
-	return *this;
-}
+// list<char>& list<char>::rmv_range([[maybe_unused]] std::initializer_list<index_t> start_end) {
+// 	todo();
+// 	return *this;
+// }
 
 

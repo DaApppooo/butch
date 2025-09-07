@@ -1,4 +1,4 @@
 #!/bin/env bash
 
-g++ readtest.cpp butch.cpp -o readtest -g
+g++ readtest.cpp butch.cpp list.cpp -o readtest -g
 

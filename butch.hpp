@@ -96,8 +96,8 @@ struct Unit
   { str_begin=u.str_begin; id=u.id; str_len=u.str_len;
     children_len=u.children_len; return *this; }
 
-  View<char> str(Parser&);
-  Unit& child(Parser&);
+  View<char> str(const Parser&);
+  bool is(const Parser&, const View<char> s);
 };
 
 struct Rule
@@ -116,6 +116,7 @@ struct Rule
   static constexpr rule_id UNKNOWN_RULE = -12;
 
   static constexpr class_name_id NO_PARENT = -1;
+  static constexpr class_name_id ALIAS = -2;
   struct MatchDescriptor
   {
     uint32_t str_begin;
@@ -162,17 +163,21 @@ struct Rule
     self.parent = NO_PARENT;
     return self;
   }
-  rule_id& in_rule(int index)
+  rule_id& in_rule(int index) const
   { return in_rules[index]; }
-  class_name_id& in_class(int index)
+  class_name_id& in_class(int index) const
   { return in_class_names[index]; }
   MatchDescriptor _sequence_match(Parser&, View<Unit>);
   MatchDescriptor _match_str(Parser&, View<Unit>, list<RulePt>&);
   MatchDescriptor _match_rgx(Parser&, View<Unit>, list<RulePt>&);
   void destroy()
   {
-    delete[] in_rules;
-    delete[] in_class_names;
+    if (in_rules)
+      delete[] in_rules;
+    if (in_class_names)
+      delete[] in_class_names;
+    in_rules = nullptr;
+    in_class_names = nullptr;
   }
 };
 
@@ -204,7 +209,9 @@ struct Parser
       DOUBLE_QUOTE_MISMATCH, // .offset
       SINGLE_QUOTE_MISMATCH, // .offset
       CANT_OPEN_FILE,
-      UNDECLARED_RULE // .name
+      UNDECLARED_RULE, // .name
+      MISPLACED_PLUS // .name (name of the rule where the error occured)
+      // MISSING_PARENTHESIS << this is fine
     } type;
     union { uint32_t offset; Own<char*> name; };
   };

@@ -63,6 +63,13 @@ struct View<char>
   { return View<char>(start+start_off, len-start_off-end_off); }
 };
 
+template <class T>
+bool operator == (const View<T> a, const View<T> b)
+{
+  if (a.len != b.len) return false;
+  return memcmp(a.start, b.start, a.len*sizeof(T)) == 0;
+}
+
 template <class T> class list
 {
 public:
@@ -114,7 +121,7 @@ public:
   inline Self& own(list<T>& other);
 
   inline T* data() const;
-  inline size_t len() const;
+  size_t len() const;
   inline size_t cap() const;
 
   // len == 0
@@ -156,12 +163,14 @@ GEN list<T>::list()
   _cap = 0;
 }
 
-GEN inline size_t list<T>::len() const
+#ifndef LIST_LEN
+GEN size_t list<T>::len() const
 {
   if (_data == nullptr)
     return 0;
   return FETCH_LEN();
 }
+#endif
 GEN inline Self& list<T>::set_len(size_t new_len) 
 {
   if (new_len > 0)
@@ -728,7 +737,7 @@ public:
   {
     return _data;
   }
-  inline size_t len() const;
+  size_t len() const;
 
   // len == 0
   inline bool is_empty() const
@@ -758,11 +767,6 @@ inline Self& list<char>::clear() {
 	self._data[0] = 0;
 	return self;
 }
-
-inline size_t list<char>::len() const {
-	return str_len(self._data);
-}
-
 inline Self& list<char>::hold(Self& other)
 {
   self = other;
