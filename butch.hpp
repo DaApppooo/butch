@@ -221,8 +221,9 @@ struct Parser
       SINGLE_QUOTE_MISMATCH, // .offset
       CANT_OPEN_FILE,
       UNDECLARED_RULE, // .name
-      MISPLACED_PLUS // .name (name of the rule where the error occured)
+      MISPLACED_PLUS, // .name (name of the rule where the error occured)
       // MISSING_PARENTHESIS << this is fine
+      ALIAS_SYNTAX_ERROR // .name (same as MISPLACED_PLUS)
     } type;
     union { uint32_t offset; Own<char*> name; };
   };

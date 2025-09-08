@@ -253,6 +253,11 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       });
     for (int j = 0; j < r.in_len; j++)
     {
+      if (*self.classes[r.out].start == ALIAS_CHAR && r.in_rule(j) < 0)
+        return err<Parser>(Error{
+          .type=Error::ALIAS_SYNTAX_ERROR,
+          .name=_butch_allocpy_view(self.classes[r.out])
+        });
       if (r.in_rule(j) == Rule::UNKNOWN_RULE)
       {
         const rule_id find_test = self._find_rule(r.in_class(j));
