@@ -325,6 +325,7 @@ void Parser::debug(FILE* f)
 
 bool _butch_alias_match(const Parser& p, const Rule& alias, const Unit& u)
 {
+  assert(*p.classes[alias.out].start == ALIAS_CHAR);
   for (int i = 0; i < alias.in_len; i++)
   {
     if (alias.in_rule(i) == u.id)
@@ -590,12 +591,12 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
   u.push({0, 0}).push({0, 0});
   while (u[-1].r < in_len && u[-1].u < units.len)
   {
-    printf(">>> Rule '%s': |u|=%lu u[-1]={.r=%i,.u=%i}\n",
-      parser._load_str(parser.classes[out]),
-      u.len(),
-      u[-1].r,
-      u[-1].u
-    );
+    // printf(">>> Rule '%s': |u|=%lu u[-1]={.r=%i,.u=%i}\n",
+    //   parser._load_str(parser.classes[out]),
+    //   u.len(),
+    //   u[-1].r,
+    //   u[-1].u
+    // );
     switch (in_rule(u[-1].r))
     {
       case GROUP_BEGIN:
@@ -660,9 +661,10 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
           
           if (_butch_alias_match(
             parser,
-            parser.rules[u[-1].r],
+            parser.rules[in_rule(u[-1].r)],
             units[u[-1].u]
           )) {
+            ret.include(units[u[-1].u]);
             u[-1].r++;
             _next(u[-1].u, units);
           }
@@ -677,6 +679,7 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
           if (_butch_failure(u, in_rules, in_len) == TOTAL_FAILURE)
             return failure;
         } else {
+          ret.include(units[u[-1].u]);
           u[-1].r++;
           _next(u[-1].u, units);
         }
@@ -761,7 +764,6 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
         {
           out.insert(Unit(rule_idx, match.str_begin, match.str_len, j-i),i);
           did_something = true;
-          debug_output(stdout, out.to_view());
         }
         _next(j, out.to_view());
       }

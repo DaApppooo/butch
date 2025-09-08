@@ -130,14 +130,25 @@ struct Rule
         return false;
       if (str_len == 0)
       { *this = m; return false; }
-      if (m.str_begin < str_begin)
-      {
-        str_len += str_begin - m.str_begin;
-        str_begin = m.str_begin;
-      }
-      if (m.str_len > str_len)
-        str_len = m.str_len;
+      const uint32_t os = m.str_begin;
+      const uint32_t oe = os+m.str_len;
+      uint32_t ss = str_begin;
+      uint32_t se = ss+str_len;
+      if (os < ss)
+        ss = os;
+      if (oe > se)
+        se = oe;
+      str_begin = ss;
+      str_len = se - ss;
       return false;
+    }
+    bool include(Unit u)
+    {
+      return include(MatchDescriptor{
+        u.str_begin,
+        u.str_len,
+        true
+      });
     }
     bool operator == (MatchDescriptor o)
     { return o.matched == matched
