@@ -1,12 +1,29 @@
+#include <chrono>
+#include <thread>
 #include "butch.hpp"
 
 int main(int argc, const char** argv)
 {
   if (argc < 3)
   {
-    fprintf(stderr, "Syntax: readtest <butch_file> <file_to_parse>\n");
+    fprintf(stderr,
+            "Syntax: readtest <butch_file> <file_to_parse> "
+            "[-is] [-ir]\n");
+    fprintf(stderr, "\t-is\tenables FLAG_ISOLATED_STRINGS\n");
+    fprintf(stderr, "\t-ir\tenables FLAG_ISOLATED_REGEX\n");
     return 1;
   }
+  uint32_t flags = Parser::FLAG_TRIM_SPACE_LITERALS;
+  for (int i = 3; i < argc; i++)
+  {
+#define CHECK(S) if (strcmp(argv[i], S) == 0)
+    CHECK("-is")
+      flags |= Parser::FLAG_ISOLATED_MODE_STRINGS;
+    CHECK("-ir")
+      flags |= Parser::FLAG_ISOLATED_MODE_REGEX;
+#undef CHECK
+  }
+  auto start = std::chrono::system_clock::now();
   auto res = Parser::read_file(argv[1]);
   if (res.type == ERR)
   {
@@ -35,11 +52,20 @@ int main(int argc, const char** argv)
         );
         free(res.err.name);
         break;
+      case Parser::Error::ALIAS_SYNTAX_ERROR:
+        fprintf(stderr,
+          "Aliases can only contain an enumeration of classes or aliases,"
+          " see: '%s'\n",
+          res.err.name
+        );
+        free(res.err.name);
+        break;
     }
     return 1;
   }
   auto& p = res.ok;
   p.debug(stdout);
+  p.flags = flags;
   Parser::FileParse fp = p.parse_file(argv[2]);
   if (fp.parsed_code == nullptr)
   {
@@ -49,6 +75,9 @@ int main(int argc, const char** argv)
   p.debug_output(stdout, fp.units.to_view());
   free(fp.parsed_code);
   p.destroy();
+  auto end = std::chrono::system_clock::now();
+  std::chrono::duration<double> secs = end - start;
+  printf("Done in %lf seconds.\n", secs.count());
   return 0;
 }
 

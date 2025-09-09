@@ -1,3 +1,10 @@
 int a;
-int b = 3;
-a = b + 2 * 3;
+int b;
+int c;
+int d;
+int e;
+int f;
+int g;
+a = b + c * d / e + ++f + g--;
+
+

@@ -25,7 +25,7 @@ Assign = "="
 VarDecl = Name Name
 
 # Operations
-OpPrec1 = ?Atom ?OpcPrec1 ?Atom
+OpPrec1 = ?Atom ?OpcPrec1 | ?OpcPrec1 ?Atom
 OpPrec2 = ?Atom ?OpcPrec2 ?Atom
 OpPrec3 = ?Atom ?OpcPrec3 ?Atom
 OpPrec4 = ?Atom ?OpcPrec4 ?Atom

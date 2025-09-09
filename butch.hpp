@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include "list.hpp"
 
 enum ResultType { OK, ERR };
@@ -157,14 +158,15 @@ struct Rule
   };
   static constexpr MatchDescriptor PARTIAL_FAILURE = {0, 0, true};
   static constexpr MatchDescriptor TOTAL_FAILURE = {0, 0, false};
+  rule_id* in_rules;
+  class_name_id* in_class_names;
   uint32_t in_len;
   class_name_id parent; // parent class with 'Parent/Child' syntax
                         // useful for precision parsing.
                         // (use a global class for all of cases and for one
                         // specific case use a child class)
-  class_name_id out;
-  rule_id* in_rules;
-  class_name_id* in_class_names;
+  class_name_id out : 31;
+  bool token_bit : 1;
   static Rule init(uint32_t input_count)
   {
     Rule self;
@@ -172,12 +174,23 @@ struct Rule
     self.in_rules = new rule_id[input_count];
     self.in_class_names = new class_name_id[input_count];
     self.parent = NO_PARENT;
+    self.token_bit = false;
     return self;
   }
-  rule_id& in_rule(int index) const
+  inline rule_id& in_rule(int index) const
   { return in_rules[index]; }
-  class_name_id& in_class(int index) const
+  inline class_name_id& in_class(int index) const
   { return in_class_names[index]; }
+
+  constexpr inline
+  bool is_rule(int index, std::initializer_list<rule_id> tests)
+  {
+    for (rule_id r : tests)
+      if (in_rules[index] == r)
+        return true;
+    return false;
+  }
+
   MatchDescriptor _sequence_match(Parser&, View<Unit>);
   MatchDescriptor _match_str(Parser&, View<Unit>, list<RulePt>&);
   MatchDescriptor _match_rgx(Parser&, View<Unit>, list<RulePt>&);
@@ -212,8 +225,22 @@ Use the parser to parse your custom language with:
 */
 struct Parser
 {
-  static constexpr int FLAG_TRIM_SPACE_LITERALS = 0b0001;
-  // static constexpr int FLAG_ALL // TODO add more flags
+#define FLAG_T static constexpr uint32_t
+  FLAG_T FLAG_TRIM_SPACE_LITERALS     = 0b0001U;
+  // Equivalent to surrounding the string with regex's \b
+  // (you can't do that in butch)
+  //   ex with flag:
+  //     - "a" won't match anything in "aaa"
+  //     - "b" will match in "a b c"
+  //     - "abc" won't match in "abc123"
+  //     - "ab1" won't match "ab123"
+  //     - "abc" will match in "abc++"
+  //     - "+" will match in "++"
+  //       (you could use rule ordering to match "++" first)
+  FLAG_T FLAG_ISOLATED_MODE_STRINGS   = 0b0010U;
+  FLAG_T FLAG_ISOLATED_MODE_REGEX     = 0b0100U; // same but regex
+  // TODO add more flags
+#undef FLAG_T
   struct Error
   {
     enum Type {
@@ -261,7 +288,11 @@ struct Parser
   rule_id _find_rule(class_name_id s);
   bool _check_and_do_rule(Rule& r, list<Unit>& out);
   // just loads [s.start, s.start+s.len[ U {0} into buff
-  const char* _load_str(View<char> s);
+  //   surround is used to add "\\b" around a regex string 
+  const char* _load_str(
+    View<char> s,
+    View<char> surround = View<char>(nullptr, nullptr)
+  );
   // same as _load but transforms "\\n" into "\n"
   const char* _comp_str(View<char> s);
   View<char> _rgx_match(View<char> big, View<char> pattern);

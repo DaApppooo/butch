@@ -5,7 +5,8 @@
 
 ## Concepts
 
-Butch doesn't really work with tokens or abstract syntax tree nodes, but instead
+Butch doesn't really work with tokens or abstract syntax tree nodes, but
+instead works with
 
 ## Syntax
 

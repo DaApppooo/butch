@@ -9,6 +9,8 @@
 // #include <regex>
 #include "butch.hpp"
 
+#define assume(X) do { assert(X); [[assume(X)]]; } while(false)
+
 #define ALIAS_CHAR '?'
 
 Own<char*> _butch_read_file(Ref<const char*> filename)
@@ -237,7 +239,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
         r.parent = self._find_or_make_class(parent_class_name);
       self._make_rule(r, s);
     }
-    assert(*s == '\n' || *s == 0);
+    assume(*s == '\n' || *s == 0);
     if (*s == '\n')
       s++;
   }
@@ -251,13 +253,19 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
        .type=Error::MISPLACED_PLUS,
        .name=_butch_allocpy_view(self.classes[r.out])
       });
+    r.token_bit = true;
     for (int j = 0; j < r.in_len; j++)
     {
-      if (*self.classes[r.out].start == ALIAS_CHAR && r.in_rule(j) < 0)
+      if (
+        *self.classes[r.out].start == ALIAS_CHAR
+        && r.in_rule(j) < 0
+        && r.in_rule(i) == Rule::UNKNOWN_RULE
+      ) {
         return err<Parser>(Error{
           .type=Error::ALIAS_SYNTAX_ERROR,
           .name=_butch_allocpy_view(self.classes[r.out])
         });
+      }
       if (r.in_rule(j) == Rule::UNKNOWN_RULE)
       {
         const rule_id find_test = self._find_rule(r.in_class(j));
@@ -268,6 +276,8 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
           });
         r.in_rule(j) = find_test;
       }
+      if (!r.is_rule(j, {Rule::STRING, Rule::REGEX, Rule::PIPE}))
+        r.token_bit = false;
     }
   }
   
@@ -378,7 +388,10 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
     putc(' ', f);
-    fprintf(f, "[%i:+%i]\n", ls[i].str_begin, ls[i].str_len);
+    if (ls[i].id != Unit::LITERAL && rules[ls[i].id].token_bit)
+      fprintf(f, "'%s'\n", _load_str(ls[i].str(*this)));
+    else
+      fprintf(f, "[%i:+%i]\n", ls[i].str_begin, ls[i].str_len);
     if (ls[i].children_len > 0)
     {
       depth_stack[depth_pt++] = ls[i].children_len+1;
@@ -394,13 +407,18 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
   }
 }
 
-const char* Parser::_load_str(View<char> s)
+const char* Parser::_load_str(View<char> s, View<char> surround)
 {
-  assert(s.len > 0); // undefined behavior otherwise
-  if (buff._cap < s.len+1)
+  assume(s.len > 0); // undefined behavior otherwise
+  assume(bool(surround.start) != (surround.len == 0));
+  if (buff._cap < s.len+1+surround.len*2)
     buff.prealloc(s.len+1);
-  memcpy(buff.data(), s.start, s.len);
-  buff.data()[s.len] = 0;
+  if (surround.start)
+    memcpy(buff.data(), surround.start, surround.len);
+  memcpy(buff.data()+surround.len, s.start, s.len);
+  if (surround.start)
+    memcpy(buff.data()+s.len+surround.len, surround.start, surround.len);
+  buff.data()[s.len+surround.len*2] = 0;
   return buff.data();
 }
 
@@ -466,13 +484,28 @@ const char* Parser::_comp_str(View<char> s)
   return buff.data();
 }
 
-View<char> _butch_str_match(View<char> big, View<char> pattern)
+View<char> _butch_str_match(View<char> big, View<char> pattern, bool iso)
 {
+  if (big.len < pattern.len)
+    return View<char>(nullptr, nullptr);
   for (int i = 0; i < big.len - pattern.len; i++)
   {
     if (memcmp(big.start+i, pattern.start, pattern.len) == 0)
     {
-      return {big.start+i, pattern.len};
+      if (!iso)
+        return {big.start+i, pattern.len};
+      bool left = i == 0,
+           right = i == big.len - pattern.len - 1;
+      if (!left) // ensure that no deref is done if i == 0
+        left = isspace(big.start[i-1])
+               || !isalnum(big.start[i-1])
+               || !isalnum(big.start[i]);
+      if (!right) // same thing
+        right = isspace(big.start[i+pattern.len])
+                || !isalnum(big.start[i+pattern.len])
+                || !isalnum(big.start[i+pattern.len-1]);
+      if (left && right)
+        return {big.start+i, pattern.len};
     }
   }
   return View<char>(nullptr, nullptr);
@@ -483,7 +516,10 @@ View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
   regex_t patt;
   int res;
   regmatch_t match;
-  const char* const cstr_patt = _load_str(pattern);
+  const View<char> surround = flags & FLAG_ISOLATED_MODE_REGEX
+                              ? View<char>((char*)"\\b", 2)
+                              : View<char>(nullptr, nullptr);
+  const char* const cstr_patt = _load_str(pattern, surround);
   res = regcomp(&patt, cstr_patt, REG_EXTENDED);
   if (res)
   {
@@ -551,9 +587,10 @@ Rule::MatchDescriptor Rule::_match_str(
   list<RulePt>& u
 ) {
   View<char> s;
+  const bool iso_mode = parser.flags&Parser::FLAG_ISOLATED_MODE_STRINGS;
   const View<char> big = units[u[-1].u].str(parser);
   const View<char> patt = parser.classes[in_class(u[-1].r)].shorten(1,1);
-  if ((s = _butch_str_match(big, patt)).start)
+  if ((s = _butch_str_match(big, patt, iso_mode)).start)
   {
     u[-1].r++;
     _next(u[-1].u, units);
@@ -716,11 +753,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
 
   if (*classes[r.out].start == ALIAS_CHAR)
     return false; // this is an alias
-  else if (
-     r.in_len == 1
-  && (r.in_rule(0) == Rule::REGEX
-    || r.in_rule(0) == Rule::STRING)
-  ) {
+  else if (r.token_bit) {
     // token
     for (int i = 0; i < out.len(); _next(i, out.to_view()))
     {
@@ -751,6 +784,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
             out.rmv(i);
           // debug_output(stdout, out.to_view());
           did_something = true;
+          debug_output(stdout, out.to_view());
         }
       }
     }
@@ -769,6 +803,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
         {
           out.insert(Unit(rule_idx, match.str_begin, match.str_len, j-i),i);
           did_something = true;
+          debug_output(stdout, out.to_view());
         }
         _next(j, out.to_view());
       }
@@ -784,7 +819,6 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
         {
           out[i].id = rule_idx;
           did_something = true;
-          assert(false); // TODO
         }
       }
     }
@@ -813,4 +847,5 @@ list<Unit> Parser::parse(Ref<char*> s)
 
   return out;
 }
+
 
