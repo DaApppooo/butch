@@ -13,6 +13,7 @@
 
 #define ALIAS_CHAR '?'
 
+
 Own<char*> _butch_read_file(Ref<const char*> filename)
 {
     FILE* f = fopen(filename, "r");
@@ -76,6 +77,9 @@ Result<int,int> _butch_count_units(char* s)
         case '*':
         case '+':
         case '|':
+        case '[':
+        case ']':
+        case '!':
           input_count++; s++;
           break;
         default:
@@ -90,7 +94,7 @@ Result<int,int> _butch_count_units(char* s)
   return ok<int>(input_count);
 }
 
-void Parser::_make_rule(Rule& r, char*& s)
+Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
 {
   char* start = s;
   int i = 0;
@@ -124,6 +128,22 @@ void Parser::_make_rule(Rule& r, char*& s)
           r.in_rule(i++) = Rule::PLUS; s++; break;
         case '|':
           r.in_rule(i++) = Rule::PIPE; s++; break;
+        case '!':
+          if (i+1 == r.in_len)
+            return Error::MISPLACED_NOT;
+          r.in_rule(i++) = Rule::NOT; s++; break;
+        case '[':
+          if (r.has_postpeep)
+            return Error::MISPLACED_PREPEEP;
+          if (r.has_prepeep)
+            return Error::DOUBLE_PREPEEP;
+          r.has_prepeep = true;
+          r.in_rule(i++) = Rule::PREPEEP; s++; break;
+        case ']':
+          if (r.has_postpeep)
+            return Error::DOUBLE_POSTPEEP;
+          r.has_postpeep = true;
+          r.in_rule(i++) = Rule::POSTPEEP; s++; break;
         default:
           start = s;
           while (!isspace(*s) && *s != '\n')
@@ -138,6 +158,7 @@ void Parser::_make_rule(Rule& r, char*& s)
   }
   if (*s == '#')
     while (*s != 0 && *s != '\n') s++;
+  return Error::NONE;
 }
 
 class_name_id Parser::_find_or_make_class(View<char> s)
@@ -166,6 +187,14 @@ rule_id Parser::_find_rule(class_name_id class_name)
 
 Result<Parser, Parser::Error> Parser::read(Own<char*> s)
 {
+#define ALLOCPY_CN(CLASS_ID) _butch_allocpy_view(self.classes[CLASS_ID])
+#define ERROR_CN(ERR, CLASS_ID) \
+          { start = ALLOCPY_CN(CLASS_ID); \
+          self.destroy(); \
+          return err<Parser>(Error{ \
+            .type=ERR, \
+            .name=start \
+          }); }
   if (s == nullptr)
     return err<Parser>(Error{Error::CANT_OPEN_FILE, 0});
   Parser self;
@@ -237,7 +266,9 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       r.out = self._find_or_make_class(class_name);
       if (parent_class_name.start)
         r.parent = self._find_or_make_class(parent_class_name);
-      self._make_rule(r, s);
+      Error::Type error = self._make_rule(r, s);
+      if (error != Error::NONE)
+        ERROR_CN(error, r.out);
     }
     assume(*s == '\n' || *s == 0);
     if (*s == '\n')
@@ -249,35 +280,27 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   {
     Rule& r = self.rules[i];
     if (r.in_rule(0) == Rule::PLUS)
-      return err<Parser>(Error{
-       .type=Error::MISPLACED_PLUS,
-       .name=_butch_allocpy_view(self.classes[r.out])
-      });
-    r.token_bit = true;
+      ERROR_CN(Error::MISPLACED_PLUS, r.out);
+    r.is_token = true;
     for (int j = 0; j < r.in_len; j++)
     {
       if (
-        *self.classes[r.out].start == ALIAS_CHAR
+        r.is_alias
         && r.in_rule(j) < 0
-        && r.in_rule(i) == Rule::UNKNOWN_RULE
-      ) {
-        return err<Parser>(Error{
-          .type=Error::ALIAS_SYNTAX_ERROR,
-          .name=_butch_allocpy_view(self.classes[r.out])
-        });
-      }
+        && r.in_rule(j) != Rule::UNKNOWN_RULE
+      )
+        ERROR_CN(Error::ALIAS_SYNTAX_ERROR, r.out);
       if (r.in_rule(j) == Rule::UNKNOWN_RULE)
       {
         const rule_id find_test = self._find_rule(r.in_class(j));
         if (find_test == Rule::UNKNOWN_RULE)
-          return err<Parser>(Error{
-            .type=Error::UNDECLARED_RULE,
-            .name=_butch_allocpy_view(self.classes[r.in_class(j)])
-          });
+          ERROR_CN(Error::UNDECLARED_RULE, r.in_class(j));
         r.in_rule(j) = find_test;
       }
+      if (j > 0 && r.is_rule(j-1, {Rule::NOT}) && r.in_rule(j) < 0)
+        ERROR_CN(Error::MISPLACED_NOT, r.in_class(j));
       if (!r.is_rule(j, {Rule::STRING, Rule::REGEX, Rule::PIPE}))
-        r.token_bit = false;
+        r.is_token = false;
     }
   }
   
@@ -340,12 +363,12 @@ void Parser::debug(FILE* f)
 
 bool _butch_alias_match(const Parser& p, const Rule& alias, const Unit& u)
 {
-  assert(*p.classes[alias.out].start == ALIAS_CHAR);
+  assert(alias.is_alias);
   for (int i = 0; i < alias.in_len; i++)
   {
     if (alias.in_rule(i) == u.id)
       return true;
-    else if (*p.classes[alias.in_class(i)].start == ALIAS_CHAR)
+    else if (p.rules[alias.in_rule(i)].is_alias)
       if (_butch_alias_match(p, p.rules[alias.in_rule(i)], u))
         return true;
   }
@@ -364,7 +387,7 @@ bool Unit::is(const Parser& p, const View<char> s)
     { r = p.rules.data() + i; rid = i; break; }
   }
   if (!r) return false;
-  if (*s.start == ALIAS_CHAR)
+  if (r->is_alias)
     return _butch_alias_match(p, *r, *this);
   else
     return id == rid || p.rules[id].parent == rid;
@@ -388,7 +411,7 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
     putc(' ', f);
-    if (ls[i].id != Unit::LITERAL && rules[ls[i].id].token_bit)
+    if (ls[i].id != Unit::LITERAL && rules[ls[i].id].is_token)
       fprintf(f, "'%s'\n", _load_str(ls[i].str(*this)));
     else
       fprintf(f, "[%i:+%i]\n", ls[i].str_begin, ls[i].str_len);
@@ -627,8 +650,15 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
 {
   constexpr MatchDescriptor failure = TOTAL_FAILURE;
   const std::function<void()> util = [&]() { parser.debug_output(stdout, units); };
-  MatchDescriptor ret = {.str_begin = units[-1].str_end(), .str_len=0, .matched=true};
+  MatchDescriptor ret = {
+    .str_begin = units[-1].str_end(),
+    .str_len=0,
+    .matched=true,
+    .u_begin=0,
+    .u_end=(uint16_t)units.len
+  };
   list<RulePt> u;
+  bool not_flag = false;
   u.init();
   u.push({0, 0}).push({0, 0});
   while (u[-1].r < in_len && u[-1].u < units.len)
@@ -639,11 +669,27 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
     //   u[-1].r,
     //   u[-1].u
     // );
+    if (not_flag)
+      not_flag = false;
     switch (in_rule(u[-1].r))
     {
       case GROUP_BEGIN:
         u[-1].r++;
         u.push(u[-1]);
+        break;
+      case NOT:
+        not_flag = true;
+        u[-1].r++;
+        break;
+      case PREPEEP:
+        assume(!is_token);
+        ret.u_begin = u[-1].u;
+        u[-1].r++;
+        break;
+      case POSTPEEP:
+        assume(!is_token);
+        ret.u_end = u[-1].u;
+        u[-1].r++;
         break;
       case PIPE:
         {
@@ -687,6 +733,7 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
             p = u[-1].r-1;
           u.push({.r=p, .u=u[-1].u});
           u.swap(-1, -2);
+          u[-1].r++;
           break;
         }
       case STRING:
@@ -698,7 +745,7 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
           return failure;
         break;
       default:
-        if (*parser.classes[in_class(u[-1].r)].start == ALIAS_CHAR)
+        if (parser.rules[in_rule(u[-1].r)].is_alias)
         { // aliases
           
           if (_butch_alias_match(
@@ -751,10 +798,14 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
   bool did_something = false;
   const uint32_t rule_idx = &r - rules.data();
 
-  if (*classes[r.out].start == ALIAS_CHAR)
+  char c = classes[r.out].fix();
+  printf("%s\n", classes[r.out].start);
+  classes[r.out].mov(c);
+
+  if (r.is_alias)
     return false; // this is an alias
-  else if (r.token_bit) {
-    // token
+  else if (r.is_token) {
+    // token (no peeping can happen here)
     for (int i = 0; i < out.len(); _next(i, out.to_view()))
     {
       if (out[i].id == Unit::LITERAL)
@@ -782,9 +833,8 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
           }
           if (pre_len == 0 || _is_to_be_trimmed(out[i].str_begin, pre_len))
             out.rmv(i);
-          // debug_output(stdout, out.to_view());
           did_something = true;
-          debug_output(stdout, out.to_view());
+          // debug_output(stdout, out.to_view());
         }
       }
     }
@@ -801,7 +851,13 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
         match = r._sequence_match(*this, out.slice(i, j-i));
         if (match.matched)
         {
-          out.insert(Unit(rule_idx, match.str_begin, match.str_len, j-i),i);
+          out.insert(
+            Unit(rule_idx,
+                 match.str_begin, match.str_len,
+                 match.u_end-match.u_begin
+            ),
+            i+match.u_begin
+          );
           did_something = true;
           debug_output(stdout, out.to_view());
         }

@@ -1,4 +1,8 @@
 
+GroupBegin = "("
+ScopeBegin = "{"
+GroupEnd = ")"
+ScopeEnd = "}"
 Int = '-?[0-9]+'
 Name = '\w+'
 StatementEnd = ";"
@@ -18,11 +22,11 @@ Assign = "="
 ?OpcPrec3 = Add Sub
 ?OpcPrec4 = Assign
 
-
 ?Atom = Int Name VarDecl ?Operation
 ?Operation = OpPrec1 OpPrec2 OpPrec3 OpPrec4
 
-VarDecl = Name Name
+FuncDecl = Name Name Group Scope
+VarDecl = Name Name ] ! GroupBegin
 
 # Operations
 OpPrec1 = ?Atom ?OpcPrec1 | ?OpcPrec1 ?Atom
@@ -32,3 +36,6 @@ OpPrec4 = ?Atom ?OpcPrec4 ?Atom
 
 ?StatementStart = VarDecl ?Operation
 Statement = ?StatementStart StatementEnd
+
+Group = GroupBegin ( . | ) + GroupEnd
+Scope = ScopeBegin Statement + ScopeEnd

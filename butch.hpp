@@ -75,10 +75,10 @@ struct Unit
   uint32_t str_begin;
   // number of children units following this unit in the output unit vector
   // representing a tree
-  uint32_t children_len;
   rule_id id; // points to Parser.rules
               // if id == LITERAL then this is unparsed code
   uint32_t str_len;
+  uint32_t children_len;
   inline uint32_t str_end() const { return str_begin + str_len; }
   
   Unit() {}
@@ -111,6 +111,9 @@ struct Rule
   static constexpr rule_id PLUS = -3;
   static constexpr rule_id DOT = -4;
   static constexpr rule_id PIPE = -5;
+  static constexpr rule_id NOT = -6;
+  static constexpr rule_id PREPEEP = -7;
+  static constexpr rule_id POSTPEEP = -8;
   
   static constexpr rule_id STRING = -10;
   static constexpr rule_id REGEX = -11;
@@ -123,6 +126,9 @@ struct Rule
     uint32_t str_begin;
     uint32_t str_len : 31;
     bool matched : 1;
+    // these two fields come with (pre|post)peeping
+    uint16_t u_begin; // unit view begin (included)
+    uint16_t u_end; // unit view end (excluded)
     bool include(MatchDescriptor m)
     {
       if (!m.matched)
@@ -165,8 +171,11 @@ struct Rule
                         // useful for precision parsing.
                         // (use a global class for all of cases and for one
                         // specific case use a child class)
-  class_name_id out : 31;
-  bool token_bit : 1;
+  class_name_id out;
+  bool is_token : 1;
+  bool is_alias : 1;
+  bool has_prepeep : 1;
+  bool has_postpeep : 1;
   static Rule init(uint32_t input_count)
   {
     Rule self;
@@ -174,7 +183,7 @@ struct Rule
     self.in_rules = new rule_id[input_count];
     self.in_class_names = new class_name_id[input_count];
     self.parent = NO_PARENT;
-    self.token_bit = false;
+    self.is_token = self.has_prepeep = self.has_postpeep = false;
     return self;
   }
   inline rule_id& in_rule(int index) const
@@ -244,12 +253,16 @@ struct Parser
   struct Error
   {
     enum Type {
+      NONE, // for internal use only
       DOUBLE_QUOTE_MISMATCH, // .offset
       SINGLE_QUOTE_MISMATCH, // .offset
       CANT_OPEN_FILE,
       UNDECLARED_RULE, // .name
       MISPLACED_PLUS, // .name (name of the rule where the error occured)
-      // MISSING_PARENTHESIS << this is fine
+      MISPLACED_PREPEEP, // (same as MISPLACED_PLUS)
+      DOUBLE_PREPEEP, // (same as MISPLACED_PLUS)
+      DOUBLE_POSTPEEP, // (same as MISPLACED_PLUS)
+      MISPLACED_NOT, // (same as MISPLACED_PLUS)
       ALIAS_SYNTAX_ERROR // .name (same as MISPLACED_PLUS)
     } type;
     union { uint32_t offset; Own<char*> name; };
@@ -268,7 +281,7 @@ struct Parser
   list<Rule> rules;
   string buff;
   Ref<char*> parsed_code;
-  int flags;
+  uint32_t flags;
   int flags_data;
 
   Parser() :
@@ -283,7 +296,7 @@ struct Parser
   static Result<Own<Parser>, Error> read(Own<char*> s);
   static Result<Own<Parser>, Error> read_file(Ref<const char*> filename)
   { return Parser::read(_butch_read_file(filename)); }
-  void _make_rule(Rule& r, Ref<char*>& s);
+  Error::Type _make_rule(Rule& r, Ref<char*>& s);
   class_name_id _find_or_make_class(View<char>);
   rule_id _find_rule(class_name_id s);
   bool _check_and_do_rule(Rule& r, list<Unit>& out);
