@@ -13,8 +13,7 @@
 #ifdef FILE_DIALOG
 #include "raylib.h"
 #endif
-#define poff(PTR, OFF) ((decltype(PTR))((char*)(PTR) + OFF))
-#define DEBUG
+// #define DEBUG
 #ifdef DEBUG
 #include <cstdio>
 #define assertm(COND, ...) if (!(COND)) { fprintf(stderr, __VA_ARGS__); assert(COND); }
@@ -79,7 +78,8 @@ public:
   static constexpr bool has_destroyer
       = std::experimental::is_detected_exact_v<void, _temp_has_destroyer, T>;
   T* _data;
-  size_t _cap;
+  uint32_t _len;
+  uint32_t _cap;
 
   T* begin() const { return _data; }
   T* end() const { return _data+len(); }
@@ -97,8 +97,8 @@ public:
   inline Self& insert(T element, int index);
   // Return value is not destroyed !!!
   inline T pop();
-  inline Self& prealloc(size_t size);
-  inline Self& set_len(size_t new_len);
+  inline Self& prealloc(uint32_t size);
+  inline Self& set_len(uint32_t newl);
   inline Self& realloc();
   inline Self& force_realloc();
   inline void destroy();
@@ -113,21 +113,24 @@ public:
   inline Self& ref(const list<T>& other);
   inline Self& operator=(const list<T>& other);
   inline Self& operator=(std::initializer_list<T> init_ls);
-  T& operator[](const int index) const;
+  inline T& operator[](const int index) const;
   inline View<T> operator[](std::initializer_list<int> start_end);
+  inline T& atp(const uint32_t index) const;
+  inline T& atn(const int index) const;
+  // this one is to avoid billions of call to .len()
+  inline T& atn(const int index, const uint32_t length) const;
+  
 
   // Modifies the state of the argument as disowned
   //  => other.cap := 0 (other.is_owned() := true)
   inline Self& own(list<T>& other);
 
   inline T* data() const;
-  size_t len() const;
-  inline size_t cap() const;
+  inline uint32_t len() const;
+  inline uint32_t cap() const;
 
   // len == 0
   inline bool is_empty() const;
-  // cap != 0
-  inline bool is_owned() const;
    
   inline Self& operator += (const Self&& other)
   {
@@ -141,12 +144,12 @@ public:
   //   struct fake_list_char
   //   {
   //     char* _p;
-  //     size_t cap;
+  //     uint32_t cap;
   //   };
-  //   const size_t _len = len();
+  //   const uint32_t l = len();
   //   fake_list_char ret;
-  //   ret._p = (char*)malloc(_len);
-  //   memcpy(ret._p, _data, sizeof(char)*(_len+1));
+  //   ret._p = (char*)malloc(l);
+  //   memcpy(ret._p, _data, sizeof(char)*(l+1));
   //   // Copying memory with length bytes.
   //   return *(list<char>*)&ret;
   // }
@@ -155,7 +158,6 @@ public:
 #define GEN template <class T>
 #define Self list<T>
 #define self (*this)
-#define FETCH_LEN() *(((size_t*)_data) - 1)
 
 GEN list<T>::list()
 {
@@ -163,49 +165,61 @@ GEN list<T>::list()
   _cap = 0;
 }
 
-#ifndef LIST_LEN
-GEN size_t list<T>::len() const
+GEN inline T& list<T>::atp(const uint32_t index) const
+{ return _data[index]; }
+GEN inline T& list<T>::atn(const int index) const
+{
+  [[assume(index < 0)]];
+  return _data[len() + index];
+}
+GEN inline T& list<T>::atn(const int index, const uint32_t len) const
+{
+  [[assume(index < 0)]];
+  return _data[len + index];
+}
+
+GEN inline uint32_t list<T>::len() const
 {
   if (_data == nullptr)
     return 0;
-  return FETCH_LEN();
+  return _len;
 }
-#endif
-GEN inline Self& list<T>::set_len(size_t new_len) 
+
+GEN inline Self& list<T>::set_len(uint32_t newl) 
 {
-  if (new_len > 0)
+  if (newl > 0)
   {
     assert(_data != nullptr);
-    assert(_cap >= new_len);
-    FETCH_LEN() = new_len;
+    assert(_cap >= newl);
+    _len = newl;
   }
   return *this;
 }
 GEN inline Self& list<T>::clear()
 {
-  if (_data == nullptr || !is_owned())
+  if (_data == nullptr)
   {
     init();
     return *this;
   }
-  const size_t size = FETCH_LEN();
+  const uint32_t size = _len;
   if (size == 0)
     return *this;
   if constexpr (has_destroyer)
   {
-    for (size_t i = 0; i < size; i++)
+    for (uint32_t i = 0; i < size; i++)
     {
       _data[i].destroy();
     }
   }
-  FETCH_LEN() = 0;
+  _len = 0;
   return self;
 }
 GEN inline View<T> list<T>::slice(int start, int len)
 {
   return View<T>(_data+start, len);
 }
-GEN inline size_t list<T>::cap() const { return _cap; }
+GEN inline uint32_t list<T>::cap() const { return _cap; }
 GEN inline T* list<T>::data() const { return _data; }
 GEN inline bool list<T>::is_empty() const
 {
@@ -213,13 +227,7 @@ GEN inline bool list<T>::is_empty() const
   {
     return true;
   }
-  return FETCH_LEN() == 0;
-}
-GEN inline bool list<T>::is_owned() const
-{
-  if (_data == nullptr)
-    assert(_cap == 0);
-  return _data != nullptr || _cap != 0;
+  return _len == 0;
 }
 
 GEN inline Self& list<T>::init()
@@ -229,156 +237,121 @@ GEN inline Self& list<T>::init()
   return *this;
 }
 
-GEN inline Self& list<T>::prealloc(size_t size)
+GEN inline Self& list<T>::prealloc(uint32_t size)
 {
-  const size_t _len = len();
+  const uint32_t l = len();
   if (size <= _cap)
     return self;
-  if (is_owned())
-  {
-    _cap = size;
-    _data = (T*)poff(::realloc(
-      poff(_data, -sizeof(size_t)),
-      sizeof(T) * _cap + sizeof(size_t)
-    ), sizeof(size_t));
-  }
-  else
-  {
-    const void* old = _data;
-    _cap = size;
-    _data = (T*)poff(malloc(sizeof(T) * _cap + sizeof(size_t)), sizeof(size_t));
-    if (old)
-      memcpy(
-        poff(_data, -sizeof(size_t)),
-        poff(old, -sizeof(size_t)),
-        sizeof(T)*_len + sizeof(size_t)
-      );
-    else
-      FETCH_LEN() = 0;
-  }
+  _cap = size;
+  _data = (T*)::realloc(
+    _data,
+    sizeof(T) * _cap
+  );
   return self;
 }
 
 // content of element is owned
 GEN inline Self& list<T>::push(T element)
 {
-  size_t _len = len();
-  _len++;
-  if (_len > _cap)
+  uint32_t l = len();
+  l++;
+  if (l > _cap)
   {
     if (_cap == 0 || _data == NULL)
     {
       const void* const old = (void*)_data; // Pointing to content, not length
-      _data = (T*)(((size_t*)malloc(sizeof(T) * _len + sizeof(size_t))) + 1);
-      memcpy((void*)_data, old, _len - 1); // Copying old content, not length
-      _cap = _len;
+      _data = (T*)malloc(sizeof(T) * l);
+      memcpy((void*)_data, old, l - 1); // Copying old content, not length
+      _cap = l;
     }
     else
     {
       _cap *= 2;
-      _data = (T*)poff(
-          ::realloc(
-              poff(_data, -sizeof(size_t)),
-              sizeof(T) * _cap + sizeof(size_t)
-          ),
-          sizeof(size_t)
-      );
+      _data = (T*)::realloc(_data, sizeof(T) * _cap);
     }
   }
-  _data[_len - 1] = element;
-  FETCH_LEN() = _len;
+  _data[l - 1] = element;
+  _len = l;
   return self;
 }
 
 GEN Self& list<T>::extend(const View<T> ref_ext)
 {
-  size_t init_len = len();
-  size_t _len = init_len;
-  _len += ref_ext.len;
-  if (_len > _cap)
+  uint32_t initl = len();
+  uint32_t l = initl;
+  l += ref_ext.len;
+  if (l > _cap)
   {
     if (_cap == 0 || _data == NULL)
     {
-      const void* const old = (void*)_data; // Pointing to content, not length
-      _data = (T*)(((size_t*)malloc(sizeof(T) * _len + sizeof(size_t))) + 1);
+      const void* const old = _data; // Pointing to content, not length
+      _data = (T*)malloc(sizeof(T) * l);
       memcpy(
-          (void*)_data,
+          _data,
           old,
-          _len - ref_ext.len
+          l - ref_ext.len
       ); // Copying old content, not length
-      _cap = _len;
+      _cap = l;
     }
     else
     {
-      _cap = _len;
-      _data = (T*)poff(
-          ::realloc(
-              poff(_data, -sizeof(size_t)),
-              sizeof(T) * _cap + sizeof(size_t)
-          ),
-          sizeof(size_t)
-      );
+      _cap = l;
+      _data = (T*)::realloc(_data, sizeof(T) * _cap);
     }
   }
   // 2. Push others
-  for (size_t i = init_len; i < _len; i++)
+  for (uint32_t i = initl; i < l; i++)
   {
-    _data[i] = ref_ext[i - init_len];
+    _data[i] = ref_ext[i - initl];
   }
-  if (_len > 0)
-    FETCH_LEN() = _len;
+  if (l > 0)
+    _len = l;
   return self;
 }
 
 GEN Self& list<T>::prextend(View<T> ref_pre)
 {
-  size_t init_len = len();
-  size_t _len = init_len;
-  _len += ref_pre.len;
-  if (_len == 0)
+  uint32_t initl = len();
+  uint32_t l = initl;
+  l += ref_pre.len;
+  if (l == 0)
   {
     return *this;
   }
-  if (init_len == 0)
+  if (initl == 0)
   {
     return extend(ref_pre);
   }
-  if (_len > _cap)
+  if (l > _cap)
   {
     if (_cap == 0 || _data == NULL)
     {
       const void* const old = (void*)_data; // Pointing to content, not length
-      _data = (T*)(((size_t*)malloc(sizeof(T) * _len + sizeof(size_t))) + 1);
+      _data = (T*)malloc(sizeof(T) * l);
       memcpy(
-          (void*)_data,
+          _data,
           old,
-          _len - ref_pre.len
+          l - ref_pre.len
       ); // Copying old content, not length
-      _cap = _len;
+      _cap = l;
     }
     else
     {
-      _cap = _len;
-      _data = (T*)poff(
-          ::realloc(
-              poff(_data, -sizeof(size_t)),
-              sizeof(T) * _cap + sizeof(size_t)
-          ),
-          sizeof(size_t)
-      );
+      _cap = l;
+      _data = (T*)::realloc(_data, sizeof(T) * _cap);
     }
   }
   // 1. Move everything
-  for (int i = 0; i < init_len; i++)
+  for (int i = 0; i < initl; i++)
   {
-    _data[_len - i - 1] = _data[init_len - i - 1];
+    _data[l - i - 1] = _data[initl - i - 1];
   }
   // 2. Push others
-  for (size_t i = 0; i < ref_pre.len; i++)
+  for (uint32_t i = 0; i < ref_pre.len; i++)
   {
     _data[i] = ref_pre.start[i];
   }
-  FETCH_LEN() = _len;
+  _len = l;
   return self;
 }
 
@@ -404,23 +377,23 @@ GEN inline Self& list<T>::insert(T element, int index)
 
 GEN inline Self& list<T>::rmv(int index)
 {
-  size_t _len = len();
+  uint32_t l = len();
   if constexpr (has_destroyer)
   {
     _data[index].destroy();
   }
-  _len--;
-  for (size_t i = index; i < _len; i++)
+  l--;
+  for (uint32_t i = index; i < l; i++)
   {
     _data[i] = _data[i + 1];
   }
-  FETCH_LEN() = _len;
+  _len = l;
   return self;
 }
 
 GEN Self& list<T>::rmv_range(std::initializer_list<int> start_end)
 {
-  size_t _len = len();
+  uint32_t l = len();
   int start = *start_end.begin();
   int end = *(start_end.begin() + 1);
   assert(start < end);
@@ -431,13 +404,13 @@ GEN Self& list<T>::rmv_range(std::initializer_list<int> start_end)
       _data[i].destroy();
     }
   }
-  const size_t dist = end - start;
-  _len -= dist;
-  for (size_t i = start; i < _len; i++)
+  const uint32_t dist = end - start;
+  l -= dist;
+  for (uint32_t i = start; i < l; i++)
   {
     _data[i] = _data[i + dist];
   }
-  FETCH_LEN() = _len;
+  _len = l;
   return self;
 }
 
@@ -450,10 +423,10 @@ GEN inline View<T> list<T>::to_view() const
 // Object is not destroyed !!!
 GEN inline T list<T>::pop()
 {
-  const size_t _len = len();
-  assertm(_len > 0, "You tried to pop an empty list!\n");
-  FETCH_LEN() = _len - 1;
-  return _data[_len - 1];
+  const uint32_t l = len();
+  assertm(l > 0, "You tried to pop an empty list!\n");
+  _len = l - 1;
+  return _data[l - 1];
 }
 
 GEN inline Self& list<T>::swap(int a, int b)
@@ -478,17 +451,17 @@ GEN inline Self& list<T>::force_realloc()
 {
   if (_data == nullptr)
     return self;
-  size_t _len = FETCH_LEN();
-  if (_len == 0)
+  uint32_t l = _len;
+  if (l == 0)
   {
     _data = nullptr;
     _cap = 0;
     return self;
   }
   T* old = _data;
-  _data = calloc(_len, sizeof(T));
-  _cap = _len;
-  memcpy(_data, old, _len);
+  _data = calloc(l, sizeof(T));
+  _cap = l;
+  memcpy(_data, old, l);
   // NOTE: this function doesn't free memory
   return self;
 }
@@ -533,28 +506,24 @@ GEN inline Self& list<T>::operator=(std::initializer_list<T> init_ls)
       _cap == 0,
       "[MEMCHECK] You tried to assign to a list, but you forgot to destroy it "
       "! (with an initializer list)\n"
-  ) _data
-      = (T*)poff(
-          malloc(sizeof(T) * init_ls.size() + sizeof(size_t)),
-          sizeof(size_t)
-      );
-  FETCH_LEN() = (size_t)(init_ls.size());
-  _cap = (size_t)(init_ls.size());
+  )
+  _data = (T*)malloc(sizeof(T) * init_ls.size());
+  _cap = _len = (uint32_t)(init_ls.size());
   return self;
 }
 
 GEN T& list<T>::operator[](const int index) const
 {
-  const size_t _len = len();
+  const uint32_t l = len();
   if (index < 0)
   {
-    return _data[_len + index];
+    return _data[l + index];
   }
 #ifdef DEBUG
-  assertm(0 <= index && index < _len,
+  assertm(0 <= index && index < l,
           "list out of bound access with index %i (len=%i)\n",
           index,
-          (int)_len
+          (int)l
   );
 #endif
   return _data[index];
@@ -582,35 +551,30 @@ GEN inline Self& list<T>::own(list<T>& other)
 
 GEN inline void list<T>::destroy()
 {
-  if (is_owned())
+  if constexpr (has_destroyer)
   {
-    if constexpr (has_destroyer)
+    const uint32_t l = _len;
+    for (uint32_t i = 0; i < l; i++)
     {
-      const size_t _len = FETCH_LEN();
-      for (size_t i = 0; i < _len; i++)
-      {
-        _data[i].destroy();
-      }
+      _data[i].destroy();
     }
-    if (_data != nullptr)
-    {
-      free(((size_t*)_data) - 1);
-    }
-    _data = nullptr;
-    _cap = 0;
   }
+  if (_data != nullptr)
+    free(_data);
+  _data = nullptr;
+  _cap = 0;
 }
 
 GEN inline Self list<T>::copy() const
 {
-  const size_t _len = len();
+  const uint32_t l = len();
   list<T> ret;
   ret.init();
-  ret.prealloc(_len);
+  ret.prealloc(l);
   memcpy(
-      ((size_t*)ret._data) - 1,
-      ((size_t*)_data) - 1,
-      sizeof(size_t) + sizeof(T) * _len
+      ret._data,
+      _data,
+      sizeof(T) * l
   );
   // Copying memory with length bytes.
   return ret;
@@ -626,7 +590,6 @@ GEN inline Self operator + (const Self a, const T&& obj)
 }
 
 #undef GEN
-#undef FETCH_LEN
 #undef Self
 #undef self
 
@@ -638,11 +601,12 @@ GEN inline Self operator + (const Self a, const T&& obj)
 #define Self list<char>
 #define self (*this)
 
-inline constexpr size_t str_len(const char* const s)
+inline constexpr size_t str_len(const char* s)
 {
   if (s == nullptr) return 0;
-  if (*s == 0) return 0;
-  return strlen(s);
+  size_t l = 0;
+  while (*(s++) != 0) { l++; }
+  return l;
 }
 inline bool str_eq(const char* a, const char* b)
 {
@@ -680,16 +644,15 @@ public:
   Self& extend(View<T> ref_ext);
   inline Self& hold(Self& other);
   inline Self& insert(T element, int index);
-  // Return value is not destroyed !!!
   inline T pop();
   inline Self& prealloc(size_t size);
-  inline Self& set_len(size_t new_len) = delete;
+  inline Self& setl(size_t newl) = delete;
   inline Self& realloc()
   {
     assert(_cap == 0);
     const char* old = _data;
-    const int _len = len();
-    _cap = _len;
+    const int l = len();
+    _cap = l;
     _data = (char*)malloc(_cap+1);
     memcpy(_data, old, _cap+1);
     return *this;
@@ -737,7 +700,7 @@ public:
   {
     return _data;
   }
-  size_t len() const;
+  inline size_t len() const;
 
   // len == 0
   inline bool is_empty() const
@@ -763,6 +726,10 @@ public:
 };
 
 
+inline size_t list<char>::len() const {
+	return str_len(_data);
+}
+
 inline Self& list<char>::clear() {
 	self._data[0] = 0;
 	return self;
@@ -775,14 +742,14 @@ inline Self& list<char>::hold(Self& other)
 }
 
 inline Self& list<char>::push(char element) {
-	size_t _len = len();
-	_len++;
-	if (_len > _cap) {
+	size_t l = len();
+	l++;
+	if (l > _cap) {
 		if (_cap == 0 || _data == NULL) {
 			const void* const old = (void*)_data; // Pointing to content, not length
-			_data = (char*)malloc(sizeof(char)*(_len+1));
-			memcpy((void*)_data, old, _len); // Copying old content (+Ld0), not length
-			_cap = _len;
+			_data = (char*)malloc(sizeof(char)*(l+1));
+			memcpy((void*)_data, old, l); // Copying old content (+Ld0), not length
+			_cap = l;
 		} else {
 			_cap *= 2;
 			// C++ really can be ugly sometimes ngl
@@ -793,22 +760,22 @@ inline Self& list<char>::push(char element) {
 			));
 		}
 	}
-	_data[_len-1] = element;
-	_data[_len] = 0; // could be useful, idk O_O
+	_data[l-1] = element;
+	_data[l] = 0; // could be useful, idk O_O
 	return self;
 }
 // Return value is not destroyed !!!
 
 inline char list<char>::pop() {
-	const size_t _len = len();
-	assertm(_len > 0, "You tried to pop an empty list !");
-	const char out = _data[_len-1];
-	_data[_len-1] = 0;
+	const size_t l = len();
+	assertm(l > 0, "You tried to pop an empty list !");
+	const char out = _data[l-1];
+	_data[l-1] = 0;
 	return out;
 }
 
 inline Self& list<char>::prealloc(size_t size) {
-  const size_t _len = len();
+  const size_t l = len();
   if (size <= _cap)
     return self;
   if (is_owned())
@@ -826,9 +793,9 @@ inline Self& list<char>::prealloc(size_t size) {
     _data = (char*)malloc(sizeof(char) * (_cap+1));
     if (old)
       memcpy(
-        poff(_data, -sizeof(size_t)),
-        poff(old, -sizeof(size_t)),
-        sizeof(T)*_len + sizeof(size_t)
+        _data,
+        old,
+        sizeof(T)*l
       );
     else
       _data[0] = 0;
@@ -839,17 +806,17 @@ inline Self& list<char>::prealloc(size_t size) {
 inline Self& list<char>::force_realloc() {
 	if (_data == nullptr)
 		return self;
-	const size_t _len = len();
-	if (_len == 0) {
+	const size_t l = len();
+	if (l == 0) {
 		_data = nullptr;
 		_cap = 0;
 		return self;
 	}
 	char* old = _data;
-	_data = (char*)malloc((_len+1)*sizeof(char));
-	memset(_data, 0, (_len+1)*sizeof(char));
-	_cap = _len;
-	memcpy(_data, old, _len);
+	_data = (char*)malloc((l+1)*sizeof(char));
+	memset(_data, 0, (l+1)*sizeof(char));
+	_cap = l;
+	memcpy(_data, old, l);
 	// NOTE: this function doesn't free memory
 	return self;
 }
@@ -868,8 +835,8 @@ inline void list<char>::destroy()
 }
 
 inline Self& list<char>::rmv(int index) {
-	const size_t _len = len();
-	memmove(_data + index, _data + index + 1, sizeof(char)*_len);
+	const size_t l = len();
+	memmove(_data + index, _data + index + 1, sizeof(char)*l);
 	return self;
 }
 

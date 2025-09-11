@@ -1,8 +1,5 @@
 #include "list.hpp"
 
-size_t list<char>::len() const {
-	return str_len(_data);
-}
 
 list<char> list<char>::copy() const {
 	const size_t _len = len();

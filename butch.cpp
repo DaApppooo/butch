@@ -163,9 +163,10 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
 
 class_name_id Parser::_find_or_make_class(View<char> s)
 {
-  for (int i = 0; i < classes.len(); i++)
+  const uint32_t l = classes.len();
+  for (uint32_t i = 0; i < l; i++)
   {
-    View<char> v = classes[i];
+    View<char> v = classes.atp(i);
     if (v.len != s.len)
       continue;
     if (memcmp(v.start, s.start, v.len) == 0)
@@ -177,9 +178,9 @@ class_name_id Parser::_find_or_make_class(View<char> s)
 
 rule_id Parser::_find_rule(class_name_id class_name)
 {
-  for (int i = 0; i < rules.len(); i++)
+  for (uint32_t i = 0; i < rules.len(); i++)
   {
-    if (rules[i].out == class_name)
+    if (rules.atp(i).out == class_name)
       return i;
   }
   return Rule::UNKNOWN_RULE;
@@ -322,7 +323,7 @@ void Parser::debug(FILE* f)
   for (Rule& r : rules)
   {
     fprintf(f, "%04i ", i++);
-    if (r.parent != Rule::NO_PARENT)
+    if (r.parent != Rule::NO_RECURSE)
     {
       c = classes[r.parent].fix();
       fprintf(f, "%s/", classes[r.parent].start);
@@ -343,6 +344,9 @@ void Parser::debug(FILE* f)
           case Rule::PLUS: p = " +"; break;
           case Rule::DOT: p = " ."; break;
           case Rule::PIPE: p = " |"; break;
+          case Rule::NOT: p = " !"; break;
+          case Rule::PREPEEP: p = " ["; break;
+          case Rule::POSTPEEP: p = " ]"; break;
           default:
             fprintf(f, "<??? %i \?\?\?>", r.in_rule(i));
             assert(!"Unknown symbol token.");
@@ -559,7 +563,7 @@ View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
   return failed;
 }
 
-inline void _next(int& start, View<Unit> units)
+inline void _next(uint32_t& start, View<Unit> units)
 { start += units[start].children_len+1; }
 
 Rule::MatchDescriptor _butch_failure(
@@ -650,6 +654,7 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
 {
   constexpr MatchDescriptor failure = TOTAL_FAILURE;
   const std::function<void()> util = [&]() { parser.debug_output(stdout, units); };
+  assume(units.len > 0);
   MatchDescriptor ret = {
     .str_begin = units[-1].str_end(),
     .str_len=0,
@@ -715,7 +720,7 @@ Rule::MatchDescriptor Rule::_sequence_match(Parser& parser, View<Unit> units)
         break;
       case PLUS:
         {
-          int p;
+          uint32_t p;
           if (in_rule(u[-1].r-1) == GROUP_END)
           {
             p = u[-1].r-2;
@@ -792,21 +797,25 @@ bool Parser::_is_to_be_trimmed(uint32_t begin, uint32_t len)
   return true;
 }
 
-bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
-{
+bool Parser::_check_and_do_rule(
+  Rule& r,
+  list<Unit>& out,
+  uint32_t start,
+  uint32_t end
+) {
   Rule::MatchDescriptor match;
   bool did_something = false;
   const uint32_t rule_idx = &r - rules.data();
 
-  char c = classes[r.out].fix();
-  printf("%s\n", classes[r.out].start);
-  classes[r.out].mov(c);
+  // char c = classes[r.out].fix();
+  // printf("%s\n", classes[r.out].start);
+  // classes[r.out].mov(c);
 
   if (r.is_alias)
     return false; // this is an alias
   else if (r.is_token) {
     // token (no peeping can happen here)
-    for (int i = 0; i < out.len(); _next(i, out.to_view()))
+    for (uint32_t i = start; i < end; _next(i, out.to_view()))
     {
       if (out[i].id == Unit::LITERAL)
       {
@@ -817,6 +826,7 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
           const uint32_t pre_len = match.str_begin - out[i].str_begin;
           out[i].str_len = pre_len;
           out.insert(Unit(rule_idx, match.str_begin, match.str_len, 0), i+1);
+          end++;
           if (
              initial_length - pre_len - match.str_len > 0
           && !(_is_to_be_trimmed(
@@ -830,23 +840,27 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
               initial_length - pre_len - match.str_len,
               0
             ), i+2);
+            end++;
           }
           if (pre_len == 0 || _is_to_be_trimmed(out[i].str_begin, pre_len))
+          {
             out.rmv(i);
+            end--;
+          }
           did_something = true;
           // debug_output(stdout, out.to_view());
         }
       }
     }
   }
-  else if (r.parent == Rule::NO_PARENT)
+  else if (r.recurse != Rule::NO_RECURSE)
   {
     // top-class abstract syntax node type
-    for (int i = 0; i < out.len()-1; _next(i, out.to_view()))
+    for (uint32_t i = start; i < end-1; _next(i, out.to_view()))
     {
-      int j = i;
+      uint32_t j = i;
       _next(j, out.to_view());
-      while (j <= out.len())
+      while (j <= end)
       {
         match = r._sequence_match(*this, out.slice(i, j-i));
         if (match.matched)
@@ -859,25 +873,16 @@ bool Parser::_check_and_do_rule(Rule& r, list<Unit>& out)
             i+match.u_begin
           );
           did_something = true;
-          debug_output(stdout, out.to_view());
+          end++;
+          // printf("%i <-> %i\n", match.u_begin, (int)match.u_end);
         }
         _next(j, out.to_view());
       }
     }
-  } else {
-    // subclass
-    for (int i = 0; i < out.len(); _next(i, out.to_view()))
-    {
-      if (out[i].id == r.parent)
-      {
-        match = r._sequence_match(*this, out.slice(i+1, out[i].children_len));
-        if (match.matched)
-        {
-          out[i].id = rule_idx;
-          did_something = true;
-        }
-      }
-    }
+  }
+  else
+  {
+    assert(false); // TODO
   }
   return did_something;
 }
@@ -896,7 +901,7 @@ list<Unit> Parser::parse(Ref<char*> s)
     for (Rule& r : rules)
     {
       did_something = did_something
-                      || _check_and_do_rule(r, out);
+                      || _check_and_do_rule(r, out, 0, out.len());
     }
     if (!did_something) break;
   }

@@ -1,8 +1,7 @@
 
-GroupBegin = "("
-ScopeBegin = "{"
-GroupEnd = ")"
-ScopeEnd = "}"
+Group = '\(.*\)'
+# Group/* # Recurse everything
+Scope = '\{.*\}'
 Int = '-?[0-9]+'
 Name = '\w+'
 StatementEnd = ";"
@@ -26,7 +25,12 @@ Assign = "="
 ?Operation = OpPrec1 OpPrec2 OpPrec3 OpPrec4
 
 FuncDecl = Name Name Group Scope
-VarDecl = Name Name ] ! GroupBegin
+VarDecl = Name Name
+# Group/VarDecl : VarDecl # colon lets you copy the input of a given rule
+# Sticking two colons together tries to find a class called 'VarDecl' and
+#  copy its rules. TODO
+Group/VarDecl ::
+
 
 # Operations
 OpPrec1 = ?Atom ?OpcPrec1 | ?OpcPrec1 ?Atom
@@ -37,5 +41,3 @@ OpPrec4 = ?Atom ?OpcPrec4 ?Atom
 ?StatementStart = VarDecl ?Operation
 Statement = ?StatementStart StatementEnd
 
-Group = GroupBegin ( . | ) + GroupEnd
-Scope = ScopeBegin Statement + ScopeEnd

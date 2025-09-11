@@ -104,7 +104,7 @@ struct Unit
 struct Rule
 {
   struct RulePt
-  { int r; int u; };
+  { uint32_t r; uint32_t u; };
   // basically doing token-scale regex
   static constexpr rule_id GROUP_BEGIN = -1;
   static constexpr rule_id GROUP_END = -2;
@@ -119,7 +119,7 @@ struct Rule
   static constexpr rule_id REGEX = -11;
   static constexpr rule_id UNKNOWN_RULE = -12;
 
-  static constexpr class_name_id NO_PARENT = -1;
+  static constexpr class_name_id NO_RECURSE = -1;
   static constexpr class_name_id ALIAS = -2;
   struct MatchDescriptor
   {
@@ -136,7 +136,12 @@ struct Rule
       if (m.str_len == 0)
         return false;
       if (str_len == 0)
-      { *this = m; return false; }
+      {
+        str_begin = m.str_begin;
+        str_len = m.str_len;
+        matched = m.matched;
+        return false;
+      }
       const uint32_t os = m.str_begin;
       const uint32_t oe = os+m.str_len;
       uint32_t ss = str_begin;
@@ -167,23 +172,25 @@ struct Rule
   rule_id* in_rules;
   class_name_id* in_class_names;
   uint32_t in_len;
-  class_name_id parent; // parent class with 'Parent/Child' syntax
-                        // useful for precision parsing.
-                        // (use a global class for all of cases and for one
-                        // specific case use a child class)
+  class_name_id recurse;
   class_name_id out;
   bool is_token : 1;
   bool is_alias : 1;
   bool has_prepeep : 1;
   bool has_postpeep : 1;
+  bool are_inputs_owned : 1;
   static Rule init(uint32_t input_count)
   {
     Rule self;
     self.in_len = input_count;
     self.in_rules = new rule_id[input_count];
     self.in_class_names = new class_name_id[input_count];
-    self.parent = NO_PARENT;
-    self.is_token = self.has_prepeep = self.has_postpeep = false;
+    self.is_token
+      = self.has_prepeep
+      = self.has_postpeep
+      = self.is_alias
+      = false;
+    self.are_inputs_owned = false;
     return self;
   }
   inline rule_id& in_rule(int index) const
@@ -299,7 +306,12 @@ struct Parser
   Error::Type _make_rule(Rule& r, Ref<char*>& s);
   class_name_id _find_or_make_class(View<char>);
   rule_id _find_rule(class_name_id s);
-  bool _check_and_do_rule(Rule& r, list<Unit>& out);
+  bool _check_and_do_rule(
+    Rule& r,
+    list<Unit>& out,
+    uint32_t start,
+    uint32_t end
+  );
   // just loads [s.start, s.start+s.len[ U {0} into buff
   //   surround is used to add "\\b" around a regex string 
   const char* _load_str(

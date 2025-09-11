@@ -29,6 +29,10 @@ int main(int argc, const char** argv)
   {
     switch (res.err.type)
     {
+      case Parser::Error::NONE:
+        fprintf(stderr, "Parser::Error::NONE shouldn't be returned.\n");
+        assert(false);
+        break;
       case Parser::Error::CANT_OPEN_FILE:
         fprintf(stderr, "Couldn't open file.\n");
         break;
@@ -56,6 +60,38 @@ int main(int argc, const char** argv)
         fprintf(stderr,
           "Aliases can only contain an enumeration of classes or aliases,"
           " see: '%s'\n",
+          res.err.name
+        );
+        free(res.err.name);
+        break;
+      case Parser::Error::DOUBLE_POSTPEEP:
+        fprintf(stderr,
+          "Rules can only contain one postpeep operator (']'),"
+          " see: '%s'\n",
+          res.err.name
+        );
+        free(res.err.name);
+        break;
+      case Parser::Error::DOUBLE_PREPEEP:
+        fprintf(stderr,
+          "Rules can only contain one prepeep operator ('['),"
+          " see: '%s'\n",
+          res.err.name
+        );
+        free(res.err.name);
+        break;
+      case Parser::Error::MISPLACED_PREPEEP:
+        fprintf(stderr,
+          "The prepeep operator cannot be placed after a postpeep,"
+          " see: '%s'\n",
+          res.err.name
+        );
+        free(res.err.name);
+        break;
+      case Parser::Error::MISPLACED_NOT:
+        fprintf(stderr,
+          "The not operator ('!') cannot be placed before another operator or"
+          " at the end of a rule, see: '%s'\n",
           res.err.name
         );
         free(res.err.name);
