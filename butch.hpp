@@ -119,7 +119,8 @@ struct Rule
   static constexpr rule_id REGEX = -11;
   static constexpr rule_id UNKNOWN_RULE = -12;
 
-  static constexpr class_name_id NO_RECURSE = -1;
+  static constexpr rule_id NO_RECURSE = -1;
+  static constexpr rule_id RECURSE_ALL = -2;
   static constexpr class_name_id ALIAS = -2;
   struct MatchDescriptor
   {
@@ -172,7 +173,15 @@ struct Rule
   rule_id* in_rules;
   class_name_id* in_class_names;
   uint32_t in_len;
-  class_name_id recurse;
+  /*
+  if recurse == NO_RECURSE: basic sequence match, depending on .is_token
+  if recurse == RECURSE_ALL: (top down)
+    _check_and_do_rule is re-ran on children with every rule (once)
+  if recurse == any(r): (bottom up)
+    Tries to find a unit that matched r and then runs _check_and_do_rule
+    on it once with the current rule.
+  */
+  rule_id recurse;
   class_name_id out;
   bool is_token : 1;
   bool is_alias : 1;
@@ -183,14 +192,20 @@ struct Rule
   {
     Rule self;
     self.in_len = input_count;
-    self.in_rules = new rule_id[input_count];
-    self.in_class_names = new class_name_id[input_count];
+    if (input_count)
+    {
+      self.in_rules = new rule_id[input_count];
+      self.in_class_names = new class_name_id[input_count];
+    }
+    else
+      self.in_rules = self.in_class_names = nullptr;
+    self.recurse = NO_RECURSE;
     self.is_token
       = self.has_prepeep
       = self.has_postpeep
       = self.is_alias
       = false;
-    self.are_inputs_owned = false;
+    self.are_inputs_owned = true;
     return self;
   }
   inline rule_id& in_rule(int index) const
@@ -207,15 +222,18 @@ struct Rule
     return false;
   }
 
-  MatchDescriptor _sequence_match(Parser&, View<Unit>);
+  MatchDescriptor _sequence_match(Parser&, View<Unit>, list<RulePt>&);
   MatchDescriptor _match_str(Parser&, View<Unit>, list<RulePt>&);
   MatchDescriptor _match_rgx(Parser&, View<Unit>, list<RulePt>&);
   void destroy()
   {
-    if (in_rules)
-      delete[] in_rules;
-    if (in_class_names)
-      delete[] in_class_names;
+    if (are_inputs_owned)
+    {
+      if (in_rules)
+        delete[] in_rules;
+      if (in_class_names)
+        delete[] in_class_names;
+    }
     in_rules = nullptr;
     in_class_names = nullptr;
   }
@@ -263,6 +281,7 @@ struct Parser
       NONE, // for internal use only
       DOUBLE_QUOTE_MISMATCH, // .offset
       SINGLE_QUOTE_MISMATCH, // .offset
+      RECURSION_SYNTAX_ERROR, // .offset
       CANT_OPEN_FILE,
       UNDECLARED_RULE, // .name
       MISPLACED_PLUS, // .name (name of the rule where the error occured)
@@ -306,6 +325,7 @@ struct Parser
   Error::Type _make_rule(Rule& r, Ref<char*>& s);
   class_name_id _find_or_make_class(View<char>);
   rule_id _find_rule(class_name_id s);
+  rule_id _find_next(rule_id rid);
   bool _check_and_do_rule(
     Rule& r,
     list<Unit>& out,

@@ -1,43 +1,5 @@
 
 Group = '\(.*\)'
-# Group/* # Recurse everything
-Scope = '\{.*\}'
-Int = '-?[0-9]+'
 Name = '\w+'
-StatementEnd = ";"
-
-# Operators
-Incr = "++"
-Decr = "--"
-Mul = "*"
-Div = "/"
-Add = "+"
-Sub = "-"
-Assign = "="
-
-# Operator precedences
-?OpcPrec1 = Incr Decr
-?OpcPrec2 = Mul Div
-?OpcPrec3 = Add Sub
-?OpcPrec4 = Assign
-
-?Atom = Int Name VarDecl ?Operation
-?Operation = OpPrec1 OpPrec2 OpPrec3 OpPrec4
-
-FuncDecl = Name Name Group Scope
-VarDecl = Name Name
-# Group/VarDecl : VarDecl # colon lets you copy the input of a given rule
-# Sticking two colons together tries to find a class called 'VarDecl' and
-#  copy its rules. TODO
-Group/VarDecl ::
-
-
-# Operations
-OpPrec1 = ?Atom ?OpcPrec1 | ?OpcPrec1 ?Atom
-OpPrec2 = ?Atom ?OpcPrec2 ?Atom
-OpPrec3 = ?Atom ?OpcPrec3 ?Atom
-OpPrec4 = ?Atom ?OpcPrec4 ?Atom
-
-?StatementStart = VarDecl ?Operation
-Statement = ?StatementStart StatementEnd
+Group/*
 

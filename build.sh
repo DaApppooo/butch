@@ -33,6 +33,6 @@ then
   rm ./out.folded
   rm ./callgrind.output
 else
-  g++ SRC -o readtest -g || exit 1
+  g++ $SRC -o readtest -g || exit 1
   $CMD || exit 1
 fi
