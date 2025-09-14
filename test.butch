@@ -1,5 +1,8 @@
 
-Group = '\(.*\)'
+group
+
+StatementEnd = '(?=\})'
 Name = '\w+'
 Group/*
+Scope/*
 

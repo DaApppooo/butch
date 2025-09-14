@@ -1,2 +1,7 @@
 
-abc(efg hij) klm
+int main(int argc)
+{}
+
+int func(int x)
+{}
+

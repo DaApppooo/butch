@@ -63,12 +63,12 @@ Result<Ok,Err> err(Err&& err_) { return Result<Ok, Err>(ERR, err_); }
 #define expect(COND, OK_TYPE, ERROR_CODE) \
   if (!(COND)) return err<OK_TYPE>(ERROR_CODE)
 
-
-typedef int32_t rule_id;
-typedef int32_t class_name_id;
-struct Parser;
 template <class T> using Own = T;
 template <class T> using Ref = T;
+
+using rule_id = int32_t;
+using class_id = int32_t;
+struct Parser;
 struct Unit
 {
   static constexpr rule_id LITERAL = -1; // for Unit.id
@@ -82,7 +82,7 @@ struct Unit
   inline uint32_t str_end() const { return str_begin + str_len; }
   
   Unit() {}
-  Unit(class_name_id id, uint32_t begin, uint32_t len, uint32_t children_count)
+  Unit(class_id id, uint32_t begin, uint32_t len, uint32_t children_count)
     : str_begin(begin), id(id), str_len(len), children_len(children_count) {}
   Unit(const Unit& u)
     : str_begin(u.str_begin), id(u.id), str_len(u.str_len),
@@ -119,9 +119,7 @@ struct Rule
   static constexpr rule_id REGEX = -11;
   static constexpr rule_id UNKNOWN_RULE = -12;
 
-  static constexpr rule_id NO_RECURSE = -1;
-  static constexpr rule_id RECURSE_ALL = -2;
-  static constexpr class_name_id ALIAS = -2;
+  static constexpr class_id ALIAS = -2;
   struct MatchDescriptor
   {
     uint32_t str_begin;
@@ -170,36 +168,18 @@ struct Rule
   };
   static constexpr MatchDescriptor PARTIAL_FAILURE = {0, 0, true};
   static constexpr MatchDescriptor TOTAL_FAILURE = {0, 0, false};
-  rule_id* in_rules;
-  class_name_id* in_class_names;
-  uint32_t in_len;
-  /*
-  if recurse == NO_RECURSE: basic sequence match, depending on .is_token
-  if recurse == RECURSE_ALL: (top down)
-    _check_and_do_rule is re-ran on children with every rule (once)
-  if recurse == any(r): (bottom up)
-    Tries to find a unit that matched r and then runs _check_and_do_rule
-    on it once with the current rule.
-  */
-  rule_id recurse;
-  class_name_id out;
+  uint32_t ruleset_start;
+  uint32_t input_len;
+  class_id out;
   bool is_token : 1;
   bool is_alias : 1;
   bool has_prepeep : 1;
   bool has_postpeep : 1;
   bool are_inputs_owned : 1;
-  static Rule init(uint32_t input_count)
+  static Rule init(Parser& p)
   {
     Rule self;
-    self.in_len = input_count;
-    if (input_count)
-    {
-      self.in_rules = new rule_id[input_count];
-      self.in_class_names = new class_name_id[input_count];
-    }
-    else
-      self.in_rules = self.in_class_names = nullptr;
-    self.recurse = NO_RECURSE;
+    self.ruleset_start = 
     self.is_token
       = self.has_prepeep
       = self.has_postpeep
@@ -208,39 +188,37 @@ struct Rule
     self.are_inputs_owned = true;
     return self;
   }
-  inline rule_id& in_rule(int index) const
-  { return in_rules[index]; }
-  inline class_name_id& in_class(int index) const
-  { return in_class_names[index]; }
-
-  constexpr inline
-  bool is_rule(int index, std::initializer_list<rule_id> tests)
-  {
-    for (rule_id r : tests)
-      if (in_rules[index] == r)
-        return true;
-    return false;
-  }
 
   MatchDescriptor _sequence_match(Parser&, View<Unit>, list<RulePt>&);
   MatchDescriptor _match_str(Parser&, View<Unit>, list<RulePt>&);
   MatchDescriptor _match_rgx(Parser&, View<Unit>, list<RulePt>&);
   void destroy()
   {
-    if (are_inputs_owned)
-    {
-      if (in_rules)
-        delete[] in_rules;
-      if (in_class_names)
-        delete[] in_class_names;
-    }
-    in_rules = nullptr;
-    in_class_names = nullptr;
   }
+};
+
+using ctx_id = int32_t;
+constexpr ctx_id GLOBAL_CONTEXT = -1;
+struct Context
+{
+  static constexpr uint32_t MAX_BE = 4;
+  uint32_t rulesets_start; // redunduncy in favor of data proximity
+                        // (parser.rules[rules_start].rulset_start
+                        // == .rulesets_start)
+  uint32_t rules_start;
+  uint32_t rule_count;
+  rule_id begin[MAX_BE];
+  rule_id end[MAX_BE];
+  uint8_t be_count; // begin & end count, must always be greater than 0
 };
 
 Own<char*> _butch_read_file(Ref<const char*> filename);
 Result<int,int> _butch_count_units(char* s);
+bool _butch_alias_match(
+  const Parser& p,
+  const Rule& alias,
+  const Unit& u
+);
 
 /*
 == The Butch Parser ==
@@ -301,10 +279,13 @@ struct Parser
   struct RulePack
   { View<char> class_name; Rule rule; };
   char* butch_code;
-  // i hate to mix lifetime handling technics, but i can't be bothered
-  // writing linear dynamic array
-  list<View<char>> classes;
+  list<Context> ctxs;
   list<Rule> rules;
+  list<View<char>> classes;
+  // these two are read linearly when testing every rule, so it's faster
+  // to sequence then in memory
+  list<rule_id> rulesets_rules;
+  list<class_id> rulesets_classes;
   string buff;
   Ref<char*> parsed_code;
   uint32_t flags;
@@ -317,14 +298,18 @@ struct Parser
     parsed_code(nullptr),
     flags(FLAG_TRIM_SPACE_LITERALS),
     flags_data(0)
-  { classes.init(); rules.init(); buff.init(); }
+  {
+    rules.init(); classes.init();
+    rulesets_rules.init(); rulesets_classes.init();
+    buff.init();
+  }
 
   static Result<Own<Parser>, Error> read(Own<char*> s);
   static Result<Own<Parser>, Error> read_file(Ref<const char*> filename)
   { return Parser::read(_butch_read_file(filename)); }
   Error::Type _make_rule(Rule& r, Ref<char*>& s);
-  class_name_id _find_or_make_class(View<char>);
-  rule_id _find_rule(class_name_id s);
+  class_id _find_or_make_class(View<char>);
+  rule_id _find_rule(class_id s);
   rule_id _find_next(rule_id rid);
   bool _check_and_do_rule(
     Rule& r,
@@ -359,6 +344,18 @@ struct Parser
     auto ret = parse(code);
     return {code, ret};
   }
+  constexpr inline
+  bool is_rule(Rule& r, int index, std::initializer_list<rule_id> tests)
+  {
+    for (rule_id t : tests)
+      if (in_rule(r, index) == t)
+        return true;
+    return false;
+  }
+  inline rule_id& in_rule(Rule& r, int index) const
+  { return rulesets_rules[r.ruleset_start + index]; }
+  inline class_id& in_class(Rule& r, int index) const
+  { return rulesets_classes[r.ruleset_start + index]; }
   void destroy()
   {
     free(butch_code);
@@ -367,5 +364,6 @@ struct Parser
     rules.destroy();
   }
 };
+
 
 
