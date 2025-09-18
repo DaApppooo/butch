@@ -84,38 +84,6 @@ Name = '\w+'
 NameThe2nd : Name
 ```
 
-You can specify a sub-parsing `B` of a given class `A` (meaning that for every `A` found, `B` will be checked within the children of `A`):
-```
-A/B = ruleset of B
-```
-<!--
-This is where the copy operator becomes useful:
-```
-Group = '(.*)'
-Name = '\w+'
-Group/Name : Name
-```
-
-Note the redunduncy of the class name `Name` in this syntax. To avoid this, you can simply double the colon and ignore the source for the copy. Equivalent to the code written above is this code:
-```
-Group = '(.*)'
-Name = '\w+'
-Group/Name ::
-```
-
-You can also specify that you want every declared rule to be sub-parsed into a specific class (which includes the declared class) [TODO]:
-```
-Group/* = '(.*)'
-Name = '\w+'
-```
-
-Or alternatively (order can matter):
-```
-Group = '(.*)'
-Name = '\w+'
-Group/*
-```
-
 ### Aliases
 
 Aliases are disjunctive lists of classes or aliases. Here's an example of how you write an alias:

@@ -60,14 +60,15 @@ template <class Err, class Ok>
 Result<Ok,Err> ok(Ok&& ok_) { return Result<Ok, Err>(OK, ok_); }
 template <class Ok, class Err>
 Result<Ok,Err> err(Err&& err_) { return Result<Ok, Err>(ERR, err_); }
-#define expect(COND, OK_TYPE, ERROR_CODE) \
-  if (!(COND)) return err<OK_TYPE>(ERROR_CODE)
+// #define expect(COND, OK_TYPE, ERROR_CODE) \
+//   if (!(COND)) return err<OK_TYPE>(ERROR_CODE)
 
 template <class T> using Own = T;
 template <class T> using Ref = T;
 
 using rule_id = int32_t;
 using class_id = int32_t;
+using ctx_id = int32_t;
 struct Parser;
 struct Unit
 {
@@ -193,14 +194,29 @@ struct Rule
   }
 
   MatchDescriptor _sequence_match(Parser&, View<Unit>, list<RulePt>&);
-  MatchDescriptor _match_str(Parser&, View<Unit>, list<RulePt>&);
-  MatchDescriptor _match_rgx(Parser&, View<Unit>, list<RulePt>&);
+  MatchDescriptor _match_str(
+    const Parser&,
+    View<Unit>,
+    list<RulePt>&,
+    const class_id
+  );
+  MatchDescriptor _match_rgx(
+    Parser&,
+    View<Unit>,
+    list<RulePt>&,
+    const class_id
+  );
+  MatchDescriptor _match_context(
+    Parser& p,
+    View<Unit> units,
+    list<Rule::RulePt>& u,
+    ctx_id cid
+  );
   void destroy()
   {
   }
 };
 
-using ctx_id = int32_t;
 constexpr ctx_id GLOBAL_CONTEXT = -1;
 struct Context
 {
@@ -350,7 +366,7 @@ struct Parser
     return {code, ret};
   }
   constexpr inline
-  bool is_rule(Rule& r, int index, std::initializer_list<rule_id> tests)
+  bool is_rule(const Rule& r, int index, std::initializer_list<rule_id> tests)
   {
     for (rule_id t : tests)
       if (in_rule(r, index) == t)
@@ -359,9 +375,9 @@ struct Parser
   }
   inline void _push_rc(rule_id rid, class_id cid)
   { rulesets_rules.push(rid); rulesets_classes.push(cid); }
-  inline rule_id& in_rule(Rule& r, int index) const
+  inline rule_id& in_rule(const Rule& r, int index) const
   { return rulesets_rules[r.ruleset_start + index]; }
-  inline class_id& in_class(Rule& r, int index) const
+  inline class_id& in_class(const Rule& r, int index) const
   { return rulesets_classes[r.ruleset_start + index]; }
   void destroy()
   {

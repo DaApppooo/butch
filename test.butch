@@ -1,11 +1,18 @@
 
 
+Elif = "elif"
+If = "if"
+# Else = "else"
+Then = "then"
 Name = '\w+'
-FuncDecl = Name Name PARAMETERS
-= PARAMETERS
-	Begin = "("
-	End = ")"
+Int = '[0-9]+'
 
+?Atom = Condition Name Int
+?Condit = If Elif
 
+Condition = ?Condit ?Atom Then ?Atom
 
+= USELESS
+  Begin = "("
+  # End = ")"
 

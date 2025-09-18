@@ -96,6 +96,20 @@ int main(int argc, const char** argv)
         );
         free(res.err.name);
         break;
+      case Parser::Error::CONTEXT_MISSING_BEGIN:
+        fprintf(stderr,
+          "The context '%s' doesn't have a 'Begin' rule.\n",
+          res.err.name
+        );
+        free(res.err.name);
+        break;
+      case Parser::Error::CONTEXT_MISSING_END:
+        fprintf(stderr,
+          "The context '%s' doesn't have a 'End' rule.\n",
+          res.err.name
+        );
+        free(res.err.name);
+        break;
     }
     return 1;
   }

@@ -1,6 +1,6 @@
 #!/bin/env bash
 
-SRC="readtest.cpp butch.cpp list.cpp"
+SRC="readtest.cpp parse.cpp read.cpp butch.cpp list.cpp"
 CMD="./readtest ./test.butch ./test.code"
 
 if [[ $1 = "pg" ]];

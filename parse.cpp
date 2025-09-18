@@ -1,15 +1,20 @@
 #include "butch.hpp"
+#include <regex.h>
+#include <cctype>
+
+#define expect(X) do { assert(X); [[assume(X)]]; } while(false)
 
 bool _butch_alias_match(const Parser& p, const Rule& alias, const Unit& u)
 {
   assert(alias.is_alias);
-  const rule_id* test = p.rulesets_rules[alias.ruleset_start];
-  for (int i = 0; i < ; i++)
+  const rule_id* test = p.rulesets_rules.data() + alias.ruleset_start;
+  const rule_id* const end = test + alias.input_len;
+  for (; test < end; test++)
   {
-    if (alias.in_rule(i) == u.id)
+    if (*test == u.id)
       return true;
-    else if (p.rules[alias.in_rule(i)].is_alias)
-      if (_butch_alias_match(p, p.rules[alias.in_rule(i)], u))
+    else if (p.rules[*test].is_alias)
+      if (_butch_alias_match(p, p.rules[*test], u))
         return true;
   }
   return false;
@@ -41,6 +46,7 @@ View<char> _butch_str_match(View<char> big, View<char> pattern, bool iso)
   }
   return View<char>(nullptr, nullptr);
 }
+
 View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
 {
   constexpr View<char> failed = View<char>(nullptr, nullptr);
@@ -115,55 +121,95 @@ Rule::MatchDescriptor _butch_failure(
 }
 
 Rule::MatchDescriptor Rule::_match_str(
-  Parser& parser,
+  const Parser& p,
   View<Unit> units,
-  list<RulePt>& u
+  list<RulePt>& u,
+  const class_id cid
 ) {
   View<char> s;
-  const bool iso_mode = parser.flags&Parser::FLAG_ISOLATED_MODE_STRINGS;
-  const View<char> big = units[u[-1].u].str(parser);
-  const View<char> patt = parser.classes[in_class(u[-1].r)].shorten(1,1);
+  const bool iso_mode = p.flags & Parser::FLAG_ISOLATED_MODE_STRINGS;
+  const View<char> big = units[u[-1].u].str(p);
+  const View<char> patt = p.classes[cid].shorten(1,1);
   if ((s = _butch_str_match(big, patt, iso_mode)).start)
   {
     u[-1].r++;
     _next(u[-1].u, units);
-    return {uint32_t(s.start - parser.parsed_code), s.len, true};
+    return {uint32_t(s.start - p.parsed_code), s.len, true};
   }
   else
   { // failure
-    return _butch_failure(u, in_rules, in_len);
-  }
-  return Rule::TOTAL_FAILURE;
-}
-Rule::MatchDescriptor Rule::_match_rgx(
-  Parser& parser,
-  View<Unit> units,
-  list<RulePt>& u
-) {
-  View<char> s;
-  const View<char> big = units[u[-1].u].str(parser);
-  const View<char> patt = parser.classes[in_class(u[-1].r)].shorten(1,1);
-  if ((s = parser._rgx_match(big, patt)).start)
-  {
-    u[-1].r++;
-    _next(u[-1].u, units);
-    return {uint32_t(s.start - parser.parsed_code), s.len, true};
-  }
-  else
-  { // failure
-    return _butch_failure(u, in_rules, in_len);
+    return _butch_failure(
+      u,
+      p.rulesets_rules.data()+ruleset_start,
+      input_len
+    );
   }
   return Rule::TOTAL_FAILURE;
 }
 
+Rule::MatchDescriptor Rule::_match_rgx(
+  Parser& p,
+  View<Unit> units,
+  list<RulePt>& u,
+  const class_id cid
+) {
+  View<char> s;
+  const View<char> big = units[u[-1].u].str(p);
+  const View<char> patt = p.classes[cid].shorten(1,1);
+  if ((s = p._rgx_match(big, patt)).start)
+  {
+    u[-1].r++;
+    _next(u[-1].u, units);
+    return {uint32_t(s.start - p.parsed_code), s.len, true};
+  }
+  else
+  { // failure
+    return _butch_failure(
+      u,
+      p.rulesets_rules.data()+ruleset_start,
+      input_len
+    );
+  }
+  return Rule::TOTAL_FAILURE;
+}
+
+Rule::MatchDescriptor Rule::_match_context(
+  Parser& p,
+  View<Unit> units,
+  list<Rule::RulePt>& u,
+  ctx_id cid
+) {
+  // const Context& ctx = p.ctxs[cid];
+  // Rule::MatchDescriptor m =
+  //   p.rules[ctx.begin[0]]._sequence_match(p, units.shorten(0, 1), u);
+  // if ()
+  assert(false); // TODO
+  return _butch_failure(
+    u,
+    p.rulesets_rules.data()+ruleset_start,
+    input_len
+  );
+}
+
 Rule::MatchDescriptor Rule::_sequence_match(
-  Parser& parser,
+  Parser& p,
   View<Unit> units,
   list<RulePt>& u
 ) {
+#define RPTR(INDEX) (p.rulesets_rules.data()+ruleset_start+u.atn(INDEX).r)
+#define RPTR_OFFSET(INDEX,OFF) \
+(p.rulesets_rules.data()+ruleset_start+u.atn(INDEX).r + OFF)
+#define CPTR(INDEX) (p.rulesets_classes.data()+ruleset_start+u.atn(INDEX).r)
+#define FAIL \
+  if ( \
+    _butch_failure(u, \
+    p.rulesets_classes.data()+ruleset_start, \
+    input_len \
+  ) == TOTAL_FAILURE) \
+    return failure;
+  
   constexpr MatchDescriptor failure = TOTAL_FAILURE;
-  const std::function<void()> util = [&]() { parser.debug_output(stdout, units); };
-  assume(units.len > 0);
+  expect(units.len > 0);
   MatchDescriptor ret = {
     .str_begin = units[-1].str_end(),
     .str_len=0,
@@ -174,17 +220,22 @@ Rule::MatchDescriptor Rule::_sequence_match(
   bool not_flag = false;
   u.clear();
   u.push({0, 0}).push({0, 0});
-  while (u[-1].r < in_len && u[-1].u < units.len)
+  // printf("===== Rule %s : units.len=%u =====\n",
+  //        p._load_str(p.classes[out]),
+  //        units.len
+  // );
+  // p.debug_output(stdout, units);
+  // puts("=== vvv ===");
+  while (u[-1].r < input_len && u[-1].u < units.len)
   {
-    // printf(">>> Rule '%s': |u|=%lu u[-1]={.r=%i,.u=%i}\n",
-    //   parser._load_str(parser.classes[out]),
+    // printf(">>> |u|=%u u[-1]={.r=%i,.u=%i}\n",
     //   u.len(),
     //   u[-1].r,
     //   u[-1].u
     // );
     if (not_flag)
       not_flag = false;
-    switch (in_rule(u[-1].r))
+    switch (*RPTR(-1))
     {
       case GROUP_BEGIN:
         u[-1].r++;
@@ -195,12 +246,12 @@ Rule::MatchDescriptor Rule::_sequence_match(
         u[-1].r++;
         break;
       case PREPEEP:
-        assume(!is_token);
+        expect(!is_token);
         ret.u_begin = u[-1].u;
         u[-1].r++;
         break;
       case POSTPEEP:
-        assume(!is_token);
+        expect(!is_token);
         ret.u_end = u[-1].u;
         u[-1].r++;
         break;
@@ -209,11 +260,11 @@ Rule::MatchDescriptor Rule::_sequence_match(
         int depth = 0;
         u[-1].r++;
         u[-2].r = u[-1].r;
-        while ((in_rule(u[-1].r) != GROUP_END || depth > 0) && u[-1].r < in_len)
+        while ((*RPTR(-1) != GROUP_END || depth > 0) && u[-1].r < input_len)
         {
-          if (in_rule(u[-1].r) == GROUP_BEGIN)
+          if (*RPTR(-1) == GROUP_BEGIN)
             depth++;
-          if (in_rule(u[-1].r) == GROUP_END)
+          if (*RPTR(-1) == GROUP_END)
             depth--;
           u[-1].r++;
         }
@@ -228,42 +279,46 @@ Rule::MatchDescriptor Rule::_sequence_match(
         break;
       case PLUS:
         {
-          uint32_t p;
-          if (in_rule(u[-1].r-1) == GROUP_END)
+          uint32_t rp;
+          if (*RPTR_OFFSET(-1, -1) == GROUP_END)
           {
-            p = u[-1].r-2;
+            rp = u[-1].r-2;
             int depth = 0;
-            while (p > 0 && (in_rule(p) != GROUP_BEGIN || depth != 0))
+            while (rp > 0 && (*RPTR(rp) != GROUP_BEGIN || depth != 0))
             {
-              if (in_rule(p) == GROUP_END)
+              if (*RPTR(rp) == GROUP_END)
                 depth++;
-              else if (in_rule(p) == GROUP_BEGIN)
+              else if (*RPTR(rp) == GROUP_BEGIN)
                 depth--;
-              p--;
+              rp--;
             }
           }
           else
-            p = u[-1].r-1;
-          u.push({.r=p, .u=u[-1].u});
+            rp = u[-1].r-1;
+          u.push({.r=rp, .u=u[-1].u});
           u.swap(-1, -2);
           u[-1].r++;
           break;
         }
       case STRING:
-        if (ret.include(_match_str(parser, units, u)))
+        if (ret.include(_match_str(p, units, u, *CPTR(-1))))
           return failure;
         break;
       case REGEX:
-        if (ret.include(_match_rgx(parser, units, u)))
+        if (ret.include(_match_rgx(p, units, u, *CPTR(-1))))
+          return failure;
+        break;
+      case CONTEXT:
+        if (ret.include(_match_context(p, units, u, *CPTR(-1))))
           return failure;
         break;
       default:
-        if (parser.rules[in_rule(u[-1].r)].is_alias)
+        if (p.rules[*RPTR(-1)].is_alias)
         { // aliases
           
           if (_butch_alias_match(
-            parser,
-            parser.rules[in_rule(u[-1].r)],
+            p,
+            p.rules[*RPTR(-1)],
             units[u[-1].u]
           )) {
             ret.include(units[u[-1].u]);
@@ -271,13 +326,12 @@ Rule::MatchDescriptor Rule::_sequence_match(
             _next(u[-1].u, units);
           }
           else
-            if (_butch_failure(u, in_rules, in_len) == TOTAL_FAILURE)
-              return failure;
+            FAIL;
         }
-        else if (units[u[-1].u].id != in_rule(u[-1].r))
+        else if (units[u[-1].u].id != *RPTR(-1))
         {
-          if (_butch_failure(u, in_rules, in_len) == TOTAL_FAILURE)
-            return failure;
+          printf("%u != %u\n", units[u[-1].u].id, *RPTR(-1));
+          FAIL;
         } else {
           ret.include(units[u[-1].u]);
           u[-1].r++;
@@ -286,9 +340,13 @@ Rule::MatchDescriptor Rule::_sequence_match(
         break;
     }
   }
-  if (u[-1].r < in_len || u[-1].u < units.len)
+  if (u[-1].r < input_len || u[-1].u < units.len)
     return failure;
   return ret;
+#undef RPTR
+#undef RPTR_OFFSET
+#undef CPTR
+#undef FAIL
 }
 
 bool Parser::_is_to_be_trimmed(uint32_t begin, uint32_t len)
@@ -366,7 +424,7 @@ bool Parser::_check_and_do_rule(
       }
     }
   }
-  else if (r.recurse < 0 || parent == r.recurse)
+  else
   {
     // top-class abstract syntax node type
     for (uint32_t i = start; i < end-1; _next(i, out.to_view()))
@@ -393,64 +451,6 @@ bool Parser::_check_and_do_rule(
       }
     }
   }
-  // NOTE: Offset in sub-literalization is arbitrary and should be handed to the user
-  if (r.recurse >= 0)
-  {
-    for (uint32_t i = start; i < end; _next(i, out.to_view()))
-    {
-      if (out[i].id == r.recurse)
-      {
-        const uint32_t init_len  = out.len();
-        if (rules[r.recurse].is_token && out[i].children_len == 0)
-        { // Generate sub-literal if needed
-          out[i].children_len = 1;
-          out.insert(
-            Unit(Unit::LITERAL, out[i].str_begin+1, out[i].str_len-2, 0),
-            i+1
-          );
-        }
-          did_something =
-            _check_and_do_rule(r, out, i+1, i+1+out[i].children_len)
-            || did_something;
-        const uint32_t diff = out.len() - init_len;
-        out[i].children_len += diff;
-        end += diff;
-      }
-    }
-  }
-  else if (r.recurse == Rule::RECURSE_ALL)
-  {
-    const int cb = 1, ce = 1;
-    for (uint32_t i = start; i < end; _next(i, out.to_view()))
-    {
-      if (out[i].id == rule_idx)
-      {
-        uint32_t init_len  = out.len();
-        if (r.is_token && out[i].children_len == 0)
-        { // Generate sub-literal if needed
-          if (out[i].str_len-cb-ce == 0)
-            continue;
-          out[i].children_len = 1;
-          out.insert(
-            Unit(Unit::LITERAL, out[i].str_begin+cb, out[i].str_len-cb-ce, 0),
-            i+1
-          );
-          init_len++;
-        }
-        // puts("BEFORE");
-        // debug_output(stdout, out.to_view());
-        for (Rule& subr : rules)
-          did_something =
-            _check_and_do_rule(subr, out, i+1, i+1+out[i].children_len)
-            || did_something;
-        const int32_t diff = int(out.len()) - init_len;
-        out[i].children_len += diff;
-        end += diff;
-        // puts("AFTER");
-        // debug_output(stdout, out.to_view());
-      }
-    }
-  }
   return did_something;
 }
 
@@ -465,10 +465,14 @@ list<Unit> Parser::parse(Ref<char*> s)
   for (;;)
   {
     bool did_something = false;
-    for (Rule& r : rules)
+    const uint32_t global_end =
+      ctxs.len() > 0
+      ? ctxs[0].rules_start
+      : rules.len();
+    for (uint32_t i = 0; i < global_end; i++)
     {
       did_something =
-        _check_and_do_rule(r, out, 0, out.len())
+        _check_and_do_rule(rules[i], out, 0, out.len())
         || did_something;
     }
     if (!did_something) break;

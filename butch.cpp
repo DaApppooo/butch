@@ -7,7 +7,7 @@
 // #include <regex>
 #include "butch.hpp"
 
-
+#define expect(X) do { assert(X); [[assume(X)]]; } while(false)
 #define ALIAS_CHAR '?'
 
 
@@ -58,8 +58,8 @@ bool Unit::is(const Parser& p, const View<char> s)
 
 const char* Parser::_load_str(View<char> s, View<char> surround)
 {
-  assume(s.len > 0); // undefined behavior otherwise
-  assume(bool(surround.start) != (surround.len == 0));
+  expect(s.len > 0); // undefined behavior otherwise
+  expect(bool(surround.start) != (surround.len == 0));
   if (buff._cap < s.len+1+surround.len*2)
     buff.prealloc(s.len+1);
   if (surround.start)
