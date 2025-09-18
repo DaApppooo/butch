@@ -1,4 +1,7 @@
 #include "butch.hpp"
+#include <cctype>
+
+#define assume(X) do { assert(X); [[assume(X)]]; } while(false)
 
 #define SKIP_SPACES_ONLY \
     { \
@@ -12,60 +15,52 @@
 Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
 {
   char* start = s;
-  int i = 0;
   while (*s != '\n' && *s != '#')
   {
     if (*s == '"')
     {
       start = s;
       SKIP_STRING('"')
-      r.in_rule(i) = Rule::STRING;
-      r.in_class(i++) = _find_or_make_class(View(start, ++s));
+      _push_rc(Rule::STRING, _find_or_make_class(View(start, ++s)));
     }
     else if (*s == '\'')
     {
       start = s;
       SKIP_STRING('\'')
-      r.in_rule(i) = Rule::REGEX;
-      r.in_class(i++) = _find_or_make_class(View(start, ++s));
+      _push_rc(Rule::REGEX, _find_or_make_class(View(start, ++s)));
     }
     else
     {
       switch (*s)
       {
-        case '(':
-          r.in_rule(i++) = Rule::GROUP_BEGIN; s++; break;
-        case ')':
-          r.in_rule(i++) = Rule::GROUP_END; s++; break;
-        case '.':
-          r.in_rule(i++) = Rule::DOT; s++; break;
-        case '+':
-          r.in_rule(i++) = Rule::PLUS; s++; break;
-        case '|':
-          r.in_rule(i++) = Rule::PIPE; s++; break;
-        case '!':
-          if (i+1 == r.in_len)
-            return Error::MISPLACED_NOT;
-          r.in_rule(i++) = Rule::NOT; s++; break;
+#define PUSH_SYM(CHAR, SYM) \
+  case CHAR: \
+    _push_rc(SYM, 0); \
+    s++; break;
+        PUSH_SYM('(', Rule::GROUP_BEGIN);
+        PUSH_SYM(')', Rule::GROUP_END);
+        PUSH_SYM('.', Rule::DOT);
+        PUSH_SYM('+', Rule::PLUS);
+        PUSH_SYM('|', Rule::PIPE);
+        PUSH_SYM('!', Rule::NOT);
         case '[':
           if (r.has_postpeep)
             return Error::MISPLACED_PREPEEP;
           if (r.has_prepeep)
             return Error::DOUBLE_PREPEEP;
           r.has_prepeep = true;
-          r.in_rule(i++) = Rule::PREPEEP; s++; break;
+          _push_rc(Rule::PREPEEP, 0); s++; break;
         case ']':
           if (r.has_postpeep)
             return Error::DOUBLE_POSTPEEP;
           r.has_postpeep = true;
-          r.in_rule(i++) = Rule::POSTPEEP; s++; break;
+          _push_rc(Rule::POSTPEEP, 0); s++; break;
         default:
           start = s;
           while (!isspace(*s) && *s != '\n')
             s++;
-          r.in_class(i) = _find_or_make_class(View(start, s));
-          r.in_rule(i) = _find_rule(r.in_class(i));
-          i++;
+          const class_id cid = _find_or_make_class(View(start, s));
+          _push_rc(_find_rule(cid), cid);
           break;
       }
     }
@@ -76,9 +71,13 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
   return Error::NONE;
 }
 
-class_name_id Parser::_find_or_make_class(View<char> s)
+class_id Parser::_find_or_make_class(View<char> s)
 {
   const uint32_t l = classes.len();
+  if (l == 5 && memcmp(s.start, "Begin", 5) == 0)
+    return Rule::BEGIN;
+  if (l == 3 && memcmp(s.start, "End", 3) == 0)
+    return Rule::END;
   for (uint32_t i = 0; i < l; i++)
   {
     View<char> v = classes.atp(i);
@@ -91,7 +90,7 @@ class_name_id Parser::_find_or_make_class(View<char> s)
   return classes.len()-1;
 }
 
-rule_id Parser::_find_rule(class_name_id class_name)
+rule_id Parser::_find_rule(class_id class_name)
 {
   for (uint32_t i = 0; i < rules.len(); i++)
   {
@@ -100,15 +99,15 @@ rule_id Parser::_find_rule(class_name_id class_name)
   }
   return Rule::UNKNOWN_RULE;
 }
-rule_id Parser::_find_next(rule_id rid)
+
+ctx_id Parser::_find_ctx(class_id class_name)
 {
-  const class_name_id class_name = rules.atp(rid).out;
-  for (uint32_t i = rid+1; i < rules.len(); i++)
+  for (uint32_t i = 0; i < ctxs.len(); i++)
   {
-    if (rules.atp(i).out == class_name)
+    if (ctxs.atp(i).name == class_name)
       return i;
   }
-  return Rule::UNKNOWN_RULE;
+  return GLOBAL_CONTEXT;
 }
 
 Result<Parser, Parser::Error> Parser::read(Own<char*> s)
@@ -121,17 +120,14 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
             .type=ERR, \
             .name=start \
           }); }
-  constexpr int CPY_NEXT = 1;
-  constexpr int CPY_SELF = 2;
   if (s == nullptr)
     return err<Parser>(Error{Error::CANT_OPEN_FILE, 0});
   Parser self;
   self.butch_code = s;
   
   View<char> class_name;
-  View<char> recurse_in;
+  ctx_id cctx = GLOBAL_CONTEXT;
   char* start = s;
-  int cpy_flag = 0;
 #define CHECK_COMMENTS \
     if (*s == '#') \
     { \
@@ -146,25 +142,51 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     if (*s == '\n')
     { s++; continue; }
     CHECK_COMMENTS;
+    SKIP_SPACES_ONLY;
+
+    if (*s == '=')
+    { // context change
+      s++;
+      SKIP_SPACES_ONLY;
+      start = s;
+      while (isalnum(*(s++)));
+      Context ctx;
+      ctx.rulesets_start = self.rulesets_rules.len();
+      ctx.rules_start = self.rules.len();
+      ctx.rule_count = 0;
+      ctx.name = self._find_or_make_class(View<char>(start, s));
+      ctx.begin[0] = ctx.end[0] = Rule::UNKNOWN_RULE;
+      ctx.be_count = 1;
+      SKIP_SPACES_ONLY;
+      if (*(s++) == '\n') continue; // TODO check for char ':'
+      while (*s != '\n')
+      {
+        SKIP_SPACES_ONLY;
+        start = s;
+        while (isalnum(*(s++)));
+        const class_id cid
+          = self._find_or_make_class(View<char>(start, s));
+        const ctx_id ctxid = self._find_ctx(cid);
+        if (ctxid == GLOBAL_CONTEXT
+            || self.ctxs[ctxid].begin[0] == Rule::UNKNOWN_RULE
+            || self.ctxs[ctxid].end[0] == Rule::UNKNOWN_RULE
+        ) { // failed to find context, will be resolved later
+          ctx.begin[ctx.be_count] = Rule::UNKNOWN_RULE;
+          ctx.end[ctx.be_count++] = cid;
+        }
+        else
+        {
+          ctx.begin[ctx.be_count] = self.ctxs[ctxid].begin[0];
+          ctx.end[ctx.be_count] = self.ctxs[ctxid].end[0];
+        }
+      }
+      self.ctxs.push(ctx);
+    }
 
     { // class name (and parent class)
       start = s;
-      recurse_in.start = nullptr;
       while (*s != '=' && *s != ':' && !isspace(*s) && *s != '/' && *s != 0)
         s++;
-      char* const temp = s;
-      SKIP_SPACES_ONLY;
-      if (*s == '/')
-      {
-        recurse_in = View<char>(start, temp);
-        s++;
-        SKIP_SPACES_ONLY;
-        start = s;
-        while (*s != '=' && *s != ':' && !isspace(*s) && *s != 0)
-          s++;
-      }
-      else
-        s = temp;
       class_name = View<char>(start, s);
     }
     
@@ -174,101 +196,21 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       start = s;
     }
     
-    if (*class_name.start == '*' && class_name.len == 1)
-    { // recurse everything
-      if (recurse_in.len == 0)
-      {
-        self.destroy();
-        return err<Parser>(Error{
-          Error::RECURSION_SYNTAX_ERROR,
-          uint32_t(s - self.butch_code)
-        });
-      }
-      const class_name_id cn = self._find_or_make_class(recurse_in);
-      rule_id rid = self._find_rule(cn);
-      if (rid == Rule::UNKNOWN_RULE)
-        ERROR_CN(Error::UNDECLARED_RULE, cn);
-      while (
-         rid != Rule::UNKNOWN_RULE
-      && self.rules[rid].recurse != Rule::NO_RECURSE
-      )
-      { rid = self._find_next(rid); }
-      if (rid == Rule::UNKNOWN_RULE)
-      {
-        self.rules.push(Rule::init(0));
-        Rule& r = self.rules.atn(-1);
-        r.out = cn;
-        r.recurse = Rule::RECURSE_ALL;
-        r.are_inputs_owned = false;
-      }
-      else
-        self.rules.atp(rid).recurse = Rule::RECURSE_ALL;
-      continue;
-    }
-    
-    if (*s == ':')
-    {
-      if (*(s+1) == ':')
-        cpy_flag = CPY_SELF;
-      else
-        cpy_flag = CPY_NEXT;
-      SKIP_SPACES_ONLY;
-    }
-
     { // class rule
-      auto res = _butch_count_units(s);
-      if (res.type == ERR)
-      {
-        self.destroy();
-        if (res.err == 0)
-          return err<Parser>(Error{
-            Error::DOUBLE_QUOTE_MISMATCH,
-            uint32_t(s - self.butch_code)
-          });
-        else
-          return err<Parser>(Error{
-            Error::SINGLE_QUOTE_MISMATCH,
-            uint32_t(s - self.butch_code)
-          });
-      }
-      if (cpy_flag)
-        self.rules.push(Rule::init(0));
-      else
-        self.rules.push(Rule::init(res.ok));
+      self.rules.push(Rule::init());
       Rule& r = self.rules[-1];
+      r.ruleset_start = self.rulesets_rules.len();
       r.out = self._find_or_make_class(class_name);
-      if (recurse_in.start)
-        r.recurse = self._find_or_make_class(recurse_in);
-      if (cpy_flag == 0)
+      Error::Type error = self._make_rule(r, s);
+      if (error != Error::NONE)
+        ERROR_CN(error, r.out);
+      if (cctx != GLOBAL_CONTEXT)
       {
-        Error::Type error = self._make_rule(r, s);
-        if (error != Error::NONE)
-          ERROR_CN(error, r.out);
-      }
-      else
-      {
-        rule_id rid;
-        if (cpy_flag == CPY_SELF)
-          rid = self._find_rule(r.out);
-        else
-        {
-          start = s;
-          while (*s != '\n' && *s != ' ' && *s != 0)
-          { s++; }
-          const class_name_id cn = self._find_or_make_class(View<char>(start, s));
-          rid = self._find_rule(cn);
-        }
-        if (rid == Rule::UNKNOWN_RULE)
-          ERROR_CN(Error::UNDECLARED_RULE, r.out);
-        const Rule& src = self.rules[rid];
-        r.in_rules = src.in_rules;
-        r.in_class_names = src.in_class_names;
-        r.is_alias = src.is_alias;
-        r.is_token = src.is_token;
-        r.has_prepeep = src.has_prepeep;
-        r.has_postpeep = src.has_postpeep;
-        r.are_inputs_owned = false;
-        cpy_flag = 0;
+        if (r.out == Rule::BEGIN)
+          self.ctxs[cctx].begin[0] = self.rules.len()-1;
+        else if (r.out == Rule::END)
+          self.ctxs[cctx].end[0] = self.rules.len()-1;
+        self.ctxs[cctx].rule_count++;
       }
     }
     assume(*s == '\n' || *s == 0);
@@ -277,34 +219,47 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   }
 
   // resolve rules with Rule.in_rule(x) == UNKNOWN_RULE
+  rule_id* rids = self.rulesets_rules.data();
+  class_id* cids = self.rulesets_classes.data();
   for (uint32_t i = 0; i < self.rules.len(); i++)
   {
     Rule& r = self.rules[i];
-    if (r.in_len == 0)
+    if (r.input_len == 0)
       continue;
-    if (r.in_rule(0) == Rule::PLUS)
+    if (self.in_rule(r, 0) == Rule::PLUS)
       ERROR_CN(Error::MISPLACED_PLUS, r.out);
     r.is_token = true;
-    for (int j = 0; j < r.in_len; j++)
+    for (int j = 0; j < r.input_len; j++)
     {
       if (
         r.is_alias
-        && r.in_rule(j) < 0
-        && r.in_rule(j) != Rule::UNKNOWN_RULE
+        && rids[j] < 0
+        && rids[j] != Rule::UNKNOWN_RULE
       )
         ERROR_CN(Error::ALIAS_SYNTAX_ERROR, r.out);
-      if (r.in_rule(j) == Rule::UNKNOWN_RULE)
+      if (rids[j] == Rule::UNKNOWN_RULE)
       {
-        const rule_id find_test = self._find_rule(r.in_class(j));
+        const rule_id find_test = self._find_rule(cids[j]);
         if (find_test == Rule::UNKNOWN_RULE)
-          ERROR_CN(Error::UNDECLARED_RULE, r.in_class(j));
-        r.in_rule(j) = find_test;
+          ERROR_CN(Error::UNDECLARED_RULE, cids[j]);
+        rids[j] = find_test;
       }
-      if (j > 0 && r.is_rule(j-1, {Rule::NOT}) && r.in_rule(j) < 0)
-        ERROR_CN(Error::MISPLACED_NOT, r.in_class(j));
-      if (!r.is_rule(j, {Rule::STRING, Rule::REGEX, Rule::PIPE}))
+      if (j > 0 && rids[j-1] == Rule::NOT && rids[j] < 0)
+        ERROR_CN(Error::MISPLACED_NOT, cids[j]);
+      if (!self.is_rule(r, j, {Rule::STRING, Rule::REGEX, Rule::PIPE}))
         r.is_token = false;
     }
+    rids += r.input_len;
+    cids += r.input_len;
+  }
+
+  for (uint32_t i = 0; i < self.ctxs.len(); i++)
+  {
+    if (self.ctxs[i].begin[0] == Rule::UNKNOWN_RULE)
+      ERROR_CN(Error::CONTEXT_MISSING_BEGIN, self.ctxs[i].name);
+    if (self.ctxs[i].end[0] == Rule::UNKNOWN_RULE)
+      ERROR_CN(Error::CONTEXT_MISSING_END, self.ctxs[i].name);
+
   }
   
   return ok<Error>(self);

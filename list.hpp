@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #ifndef H_LIST
@@ -647,16 +648,16 @@ public:
   inline T pop();
   inline Self& prealloc(size_t size);
   inline Self& setl(size_t newl) = delete;
-  inline Self& realloc()
-  {
-    assert(_cap == 0);
-    const char* old = _data;
-    const int l = len();
-    _cap = l;
-    _data = (char*)malloc(_cap+1);
-    memcpy(_data, old, _cap+1);
-    return *this;
-  }
+  inline Self& realloc() = delete;
+  // {
+  //   assert(_cap == 0);
+  //   const char* old = _data;
+  //   const int l = len();
+  //   _cap = l;
+  //   _data = (char*)malloc(_cap+1);
+  //   memcpy(_data, old, _cap+1);
+  //   return *this;
+  // }
   inline Self& force_realloc();
   inline void destroy();
   Self copy() const;
@@ -746,10 +747,9 @@ inline Self& list<char>::push(char element) {
 	l++;
 	if (l > _cap) {
 		if (_cap == 0 || _data == NULL) {
-			const void* const old = (void*)_data; // Pointing to content, not length
-			_data = (char*)malloc(sizeof(char)*(l+1));
-			memcpy((void*)_data, old, l); // Copying old content (+Ld0), not length
-			_cap = l;
+		  assert(l == 0);
+			_data = (char*)malloc(8);
+			_cap = 7;
 		} else {
 			_cap *= 2;
 			// C++ really can be ugly sometimes ngl
@@ -764,8 +764,8 @@ inline Self& list<char>::push(char element) {
 	_data[l] = 0; // could be useful, idk O_O
 	return self;
 }
-// Return value is not destroyed !!!
 
+// Return value is not destroyed !!!
 inline char list<char>::pop() {
 	const size_t l = len();
 	assertm(l > 0, "You tried to pop an empty list !");
@@ -788,17 +788,10 @@ inline Self& list<char>::prealloc(size_t size) {
   }
   else
   {
-    const void* old = _data;
-    _cap = size;
-    _data = (char*)malloc(sizeof(char) * (_cap+1));
-    if (old)
-      memcpy(
-        _data,
-        old,
-        sizeof(T)*l
-      );
-    else
-      _data[0] = 0;
+    size = std::max(8UL, size);
+    _cap = size-1;
+    _data = (char*)malloc(size);
+    _data[0] = 0;
   }
   return self;
 }

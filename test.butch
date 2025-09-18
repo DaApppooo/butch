@@ -1,8 +1,11 @@
 
-group
 
-StatementEnd = '(?=\})'
 Name = '\w+'
-Group/*
-Scope/*
+FuncDecl = Name Name PARAMETERS
+= PARAMETERS
+	Begin = "("
+	End = ")"
+
+
+
 

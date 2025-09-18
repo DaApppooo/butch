@@ -1,15 +1,12 @@
 #include <cassert>
 #include <cctype>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <regex.h>
 // #include <regex>
 #include "butch.hpp"
 
-#define assume(X) do { assert(X); [[assume(X)]]; } while(false)
 
 #define ALIAS_CHAR '?'
 

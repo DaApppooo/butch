@@ -118,8 +118,11 @@ struct Rule
   static constexpr rule_id STRING = -10;
   static constexpr rule_id REGEX = -11;
   static constexpr rule_id UNKNOWN_RULE = -12;
+  static constexpr rule_id CONTEXT = -13; // class_id is a ctx_id
 
   static constexpr class_id ALIAS = -2;
+  static constexpr class_id BEGIN = -3;
+  static constexpr class_id END = -3;
   struct MatchDescriptor
   {
     uint32_t str_begin;
@@ -176,7 +179,7 @@ struct Rule
   bool has_prepeep : 1;
   bool has_postpeep : 1;
   bool are_inputs_owned : 1;
-  static Rule init(Parser& p)
+  static Rule init()
   {
     Rule self;
     self.ruleset_start = 
@@ -207,13 +210,14 @@ struct Context
                         // == .rulesets_start)
   uint32_t rules_start;
   uint32_t rule_count;
+  class_id name;
   rule_id begin[MAX_BE];
   rule_id end[MAX_BE];
   uint8_t be_count; // begin & end count, must always be greater than 0
 };
 
 Own<char*> _butch_read_file(Ref<const char*> filename);
-Result<int,int> _butch_count_units(char* s);
+Own<char*> _butch_allocpy_view(const View<char> v);
 bool _butch_alias_match(
   const Parser& p,
   const Rule& alias,
@@ -259,7 +263,6 @@ struct Parser
       NONE, // for internal use only
       DOUBLE_QUOTE_MISMATCH, // .offset
       SINGLE_QUOTE_MISMATCH, // .offset
-      RECURSION_SYNTAX_ERROR, // .offset
       CANT_OPEN_FILE,
       UNDECLARED_RULE, // .name
       MISPLACED_PLUS, // .name (name of the rule where the error occured)
@@ -267,7 +270,9 @@ struct Parser
       DOUBLE_PREPEEP, // (same as MISPLACED_PLUS)
       DOUBLE_POSTPEEP, // (same as MISPLACED_PLUS)
       MISPLACED_NOT, // (same as MISPLACED_PLUS)
-      ALIAS_SYNTAX_ERROR // .name (same as MISPLACED_PLUS)
+      ALIAS_SYNTAX_ERROR, // .name (same as MISPLACED_PLUS)
+      CONTEXT_MISSING_BEGIN,
+      CONTEXT_MISSING_END
     } type;
     union { uint32_t offset; Own<char*> name; };
   };
@@ -284,7 +289,7 @@ struct Parser
   list<View<char>> classes;
   // these two are read linearly when testing every rule, so it's faster
   // to sequence then in memory
-  list<rule_id> rulesets_rules;
+  list<rule_id> rulesets_rules; // TODO: use same cap and length data for both
   list<class_id> rulesets_classes;
   string buff;
   Ref<char*> parsed_code;
@@ -309,8 +314,8 @@ struct Parser
   { return Parser::read(_butch_read_file(filename)); }
   Error::Type _make_rule(Rule& r, Ref<char*>& s);
   class_id _find_or_make_class(View<char>);
-  rule_id _find_rule(class_id s);
-  rule_id _find_next(rule_id rid);
+  rule_id _find_rule(class_id);
+  ctx_id _find_ctx(class_id);
   bool _check_and_do_rule(
     Rule& r,
     list<Unit>& out,
@@ -352,6 +357,8 @@ struct Parser
         return true;
     return false;
   }
+  inline void _push_rc(rule_id rid, class_id cid)
+  { rulesets_rules.push(rid); rulesets_classes.push(cid); }
   inline rule_id& in_rule(Rule& r, int index) const
   { return rulesets_rules[r.ruleset_start + index]; }
   inline class_id& in_class(Rule& r, int index) const
