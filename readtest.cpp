@@ -1,5 +1,4 @@
 #include <chrono>
-#include <thread>
 #include "butch.hpp"
 
 int main(int argc, const char** argv)
@@ -109,6 +108,9 @@ int main(int argc, const char** argv)
           res.err.name
         );
         free(res.err.name);
+        break;
+      default:
+        fprintf(stderr, "Unknown error.\n");
         break;
     }
     return 1;

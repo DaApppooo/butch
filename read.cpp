@@ -254,7 +254,6 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
         && rids[j] < 0
         && rids[j] != Rule::UNKNOWN_RULE
       ) {
-        printf("????? %i\n", rids[j]);
         ERROR_CN(Error::ALIAS_SYNTAX_ERROR, r.out);
       }
       if (rids[j] == Rule::UNKNOWN_RULE)
@@ -282,23 +281,31 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   // Resolve contexts
   for (uint32_t i = 0; i < self.ctxs.len(); i++)
   {
+    printf("%i\n", i);
     if (self.ctxs[i].begin[0] == Rule::UNKNOWN_RULE)
+    {
       ERROR_CN(Error::CONTEXT_MISSING_BEGIN, self.ctxs[i].name);
+    }
+    printf("%i\n", i);
     if (self.ctxs[i].end[0] == Rule::UNKNOWN_RULE)
       ERROR_CN(Error::CONTEXT_MISSING_END, self.ctxs[i].name);
+    printf("%i\n", i);
     for (uint8_t j = 1; j < self.ctxs[i].be_count; j++)
     {
       if (self.ctxs[i].begin[j] != Rule::UNKNOWN_RULE)
         continue;
+    printf("%i %i\n", i, j);
       const Context& src = self.ctxs[self.ctxs[i].end[j]];
       const rule_id brid = src.begin[0];
       const rule_id erid = src.end[0];
+    printf("%i %i\n", i, j);
       if (brid == Rule::UNKNOWN_RULE)
         ERROR_CN(Error::CONTEXT_MISSING_BEGIN, src.name);
       if (erid == Rule::UNKNOWN_RULE)
         ERROR_CN(Error::CONTEXT_MISSING_END, src.name);
+    printf("%i %i\n", i, j);
       self.ctxs[i].begin[j] = brid;
-      self.ctxs[i].end[j] = brid;
+      self.ctxs[i].end[j] = erid;
     }
   }
   

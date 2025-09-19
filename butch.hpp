@@ -322,6 +322,7 @@ struct Parser
   {
     rules.init(); classes.init();
     rulesets_rules.init(); rulesets_classes.init();
+    ctxs.init();
     buff.init();
   }
 
@@ -385,6 +386,9 @@ struct Parser
     butch_code = nullptr;
     classes.destroy();
     rules.destroy();
+    rulesets_classes.destroy();
+    rulesets_rules.destroy();
+
   }
 };
 
