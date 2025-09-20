@@ -1,6 +1,8 @@
 #include "butch.hpp"
+#include "list.hpp"
 #include <regex.h>
 #include <cctype>
+#include "stuff.hpp"
 
 #define expect(X) do { assert(X); [[assume(X)]]; } while(false)
 
@@ -75,11 +77,14 @@ View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
   return failed;
 }
 
-inline void _next(uint32_t& start, View<Unit> units)
-{ start += units[start].children_len+1; }
+constexpr void _butch_units_next(View<Unit>& units)
+{ units.start += units.start->children_len+1; }
+#define UITER _butch_units_next
+inline void _next(u32& i, View<Unit> units)
+{ i += units[i].children_len+1; }
 
 Rule::MatchDescriptor _butch_failure(
-  list<Rule::RulePt>& u,
+  list<Rule::Pt>& u,
   rule_id* in,
   int rule_len
 ) {
@@ -123,7 +128,7 @@ Rule::MatchDescriptor _butch_failure(
 Rule::MatchDescriptor Rule::_match_str(
   const Parser& p,
   View<Unit> units,
-  list<RulePt>& u,
+  list<Pt>& u,
   const class_id cid
 ) {
   View<char> s;
@@ -150,7 +155,7 @@ Rule::MatchDescriptor Rule::_match_str(
 Rule::MatchDescriptor Rule::_match_rgx(
   Parser& p,
   View<Unit> units,
-  list<RulePt>& u,
+  list<Pt>& u,
   const class_id cid
 ) {
   View<char> s;
@@ -175,26 +180,29 @@ Rule::MatchDescriptor Rule::_match_rgx(
 
 Rule::MatchDescriptor Rule::_match_context(
   Parser& p,
-  View<Unit> units,
-  list<Rule::RulePt>& u,
+  list<Unit>& units_list,
+  View<Unit>& units_view,
+  list<Rule::Pt>& u,
   ctx_id cid
 ) {
-  // const Context& ctx = p.ctxs[cid];
-  // Rule::MatchDescriptor m =
-  //   p.rules[ctx.begin[0]]._sequence_match(p, units.shorten(0, 1), u);
-  // if ()
-  assert(false); // TODO
-  return _butch_failure(
-    u,
-    p.rulesets_rules.data()+ruleset_start,
-    input_len
-  );
+  const Context& ctx = p.ctxs[cid];
+  Rule::MatchDescriptor m =
+    p.rules[ctx.begin[0]]._sequence_match(p, units.shorten(0, 1), u);
+  if (!m.matched || )
+    return _butch_failure(
+      u,
+      p.rulesets_rules.data()+ruleset_start,
+      input_len
+    );
+  list<uint8_t> depth;
+  depth.init();
+  depth.push(0);
 }
 
 Rule::MatchDescriptor Rule::_sequence_match(
   Parser& p,
-  View<Unit> units,
-  list<RulePt>& u
+  DynamicView<Unit>& units,
+  list<Pt>& u
 ) {
 #define RPTR(INDEX) (p.rulesets_rules.data()+ruleset_start+u.atn(INDEX).r)
 #define RPTR_OFFSET(INDEX,OFF) \
@@ -363,20 +371,13 @@ bool Parser::_is_to_be_trimmed(uint32_t begin, uint32_t len)
 
 bool Parser::_check_and_do_rule(
   Rule& r,
-  list<Unit>& out,
-  uint32_t start,
-  uint32_t end
+  Pack<Unit>& out,
+  list<Rule::Pt>& pt_buffer
 ) {
   Rule::MatchDescriptor match;
   bool did_something = false;
-  list<Rule::RulePt> seq_match_stack;
   const uint32_t rule_idx = &r - rules.data();
-  const rule_id parent =
-    start > 0
-    ? out[start-1].id
-    : Rule::UNKNOWN_RULE;
   bool test;
-  seq_match_stack.init();
 
   // char c = classes[r.out].fix();
   // printf("%s : %i:%i\n", classes[r.out].start, start, end);
@@ -386,7 +387,7 @@ bool Parser::_check_and_do_rule(
     return false; // this is an alias
   else if (r.is_token) {
     // token (no peeping can happen here)
-    for (uint32_t i = start; i < end; _next(i, out.to_view()))
+    for (out.to_view().iter_with(UITER))
     {
       if (out[i].id == Unit::LITERAL)
       {

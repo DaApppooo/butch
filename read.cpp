@@ -86,9 +86,9 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
 class_id Parser::_find_or_make_class(View<char> s)
 {
   const uint32_t l = classes.len();
-  if (l == 5 && memcmp(s.start, "Begin", 5) == 0)
+  if (s.len == 5 && memcmp(s.start, "Begin", 5) == 0)
     return Rule::BEGIN;
-  if (l == 3 && memcmp(s.start, "End", 3) == 0)
+  if (s.len == 3 && memcmp(s.start, "End", 3) == 0)
     return Rule::END;
   for (uint32_t i = 0; i < l; i++)
   {
@@ -162,17 +162,21 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       s++;
       SKIP_SPACES_ONLY;
       start = s;
-      while (isalnum(*(s++)));
-      Context ctx;
+      while (isalnum(*s)) s++;
+      cctx = self.ctxs.len();
+      self.ctxs.push(Context{});
+      Context& ctx = self.ctxs.atn(-1);
       ctx.rulesets_start = self.rulesets_rules.len();
       ctx.rules_start = self.rules.len();
       ctx.rule_count = 0;
-      ctx.name = self._find_or_make_class(View<char>(start, s-1));
+      ctx.name = self._find_or_make_class(View<char>(start, s));
       ctx.begin[0] = ctx.end[0] = Rule::UNKNOWN_RULE;
       ctx.be_count = 1;
+      SKIP_SPACES_ONLY;
       while (*s != '\n' && *s != 0)
       {
-        SKIP_SPACES_ONLY;
+        if (ctx.be_count >= 4)
+          ERROR_CN(Error::CONTEXT_TOO_MANY_INHERITS, ctx.name);
         start = s;
         while (isalnum(*(s++)));
         const class_id cid
@@ -190,8 +194,8 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
           ctx.begin[ctx.be_count] = self.ctxs[ctxid].begin[0];
           ctx.end[ctx.be_count++] = self.ctxs[ctxid].end[0];
         }
+        SKIP_SPACES_ONLY;
       }
-      self.ctxs.push(ctx);
       continue;
     }
     else if (*s == '+')
@@ -281,29 +285,23 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   // Resolve contexts
   for (uint32_t i = 0; i < self.ctxs.len(); i++)
   {
-    printf("%i\n", i);
     if (self.ctxs[i].begin[0] == Rule::UNKNOWN_RULE)
     {
       ERROR_CN(Error::CONTEXT_MISSING_BEGIN, self.ctxs[i].name);
     }
-    printf("%i\n", i);
     if (self.ctxs[i].end[0] == Rule::UNKNOWN_RULE)
       ERROR_CN(Error::CONTEXT_MISSING_END, self.ctxs[i].name);
-    printf("%i\n", i);
     for (uint8_t j = 1; j < self.ctxs[i].be_count; j++)
     {
       if (self.ctxs[i].begin[j] != Rule::UNKNOWN_RULE)
         continue;
-    printf("%i %i\n", i, j);
       const Context& src = self.ctxs[self.ctxs[i].end[j]];
       const rule_id brid = src.begin[0];
       const rule_id erid = src.end[0];
-    printf("%i %i\n", i, j);
       if (brid == Rule::UNKNOWN_RULE)
         ERROR_CN(Error::CONTEXT_MISSING_BEGIN, src.name);
       if (erid == Rule::UNKNOWN_RULE)
         ERROR_CN(Error::CONTEXT_MISSING_END, src.name);
-    printf("%i %i\n", i, j);
       self.ctxs[i].begin[j] = brid;
       self.ctxs[i].end[j] = erid;
     }
@@ -355,10 +353,17 @@ void Parser::debug(FILE* f)
     for (; k < k_end; k++)
     {
       const Rule& r = rules[k];
-      fprintf(f, "  %04i ", i++);
-      c = classes[r.out].fix();
+      fprintf(f, "  %04i ", k);
+      if (r.out == Rule::BEGIN)
+        fprintf(f, "Begin =");
+      else if (r.out == Rule::END)
+        fprintf(f, "End =");
+      else
+      {
+        c = classes[r.out].fix();
         fprintf(f, "%s =", classes[r.out].start);
-      classes[r.out].mov(c);
+        classes[r.out].mov(c);
+      }
       for (i = 0; i < r.input_len; i++)
       {
         if (in_rule(r, i) < 0 && in_rule(r, i) > Rule::STRING)

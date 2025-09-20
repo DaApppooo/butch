@@ -10,9 +10,11 @@ Int = '[0-9]+'
 ?Atom = Condition Name Int
 ?Condit = If Elif
 
+Group = GROUP
+
 Condition = ?Condit ?Atom Then ?Atom
 
-= USELESS
+= GROUP
   Begin = "("
-  # End = ")"
+  End = ")"
 

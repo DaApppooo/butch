@@ -27,13 +27,9 @@ Own<char*> _butch_read_file(Ref<const char*> filename)
 
 Own<char*> _butch_allocpy_view(const View<char> v)
 {
-  printf("%p +%i\n", v.start, v.len);
   char* ret = (char*)malloc(v.len+1);
-  printf("%p\n", ret);
   memcpy(ret, v.start, v.len);
-  printf("%c\n", *ret);
   ret[v.len] = 0;
-  printf("%s\n", ret);
   return ret;
 }
 

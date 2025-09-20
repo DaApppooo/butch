@@ -2,7 +2,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <type_traits>
 #include "list.hpp"
+
+
+
 
 enum ResultType { OK, ERR };
 template <class Ok = int, class Err = int>
@@ -14,6 +18,7 @@ struct Result
   template <class T>
   Result(ResultType r, const T& t)
   {
+    static_assert(std::is_same_v<T, Ok> || std::is_same_v<T, Err>, "Diff types ???");
     switch (r)
     { case OK: memcpy(&ok, &t, sizeof(Ok)); break;
       case ERR: memcpy(&err, &t, sizeof(Err)); break; }
@@ -104,7 +109,7 @@ struct Unit
 
 struct Rule
 {
-  struct RulePt
+  struct Pt
   { uint32_t r; uint32_t u; };
   // basically doing token-scale regex
   static constexpr rule_id GROUP_BEGIN = -1;
@@ -123,7 +128,7 @@ struct Rule
 
   static constexpr class_id ALIAS = -2;
   static constexpr class_id BEGIN = -3;
-  static constexpr class_id END = -3;
+  static constexpr class_id END = -4;
   struct MatchDescriptor
   {
     uint32_t str_begin;
@@ -193,28 +198,29 @@ struct Rule
     return self;
   }
 
-  MatchDescriptor _sequence_match(Parser&, View<Unit>, list<RulePt>&);
+  MatchDescriptor _sequence_match(
+    Parser&,
+    Pack<Unit>&,
+    list<Pt>&
+  );
   MatchDescriptor _match_str(
     const Parser&,
     View<Unit>,
-    list<RulePt>&,
+    list<Pt>&,
     const class_id
   );
   MatchDescriptor _match_rgx(
     Parser&,
     View<Unit>,
-    list<RulePt>&,
+    list<Pt>&,
     const class_id
   );
   MatchDescriptor _match_context(
     Parser& p,
-    View<Unit> units,
-    list<Rule::RulePt>& u,
+    Pack<Unit>& units,
+    list<Rule::Pt>& u,
     ctx_id cid
   );
-  void destroy()
-  {
-  }
 };
 
 constexpr ctx_id GLOBAL_CONTEXT = -1;
@@ -288,7 +294,8 @@ struct Parser
       MISPLACED_NOT, // (same as MISPLACED_PLUS)
       ALIAS_SYNTAX_ERROR, // .name (same as MISPLACED_PLUS)
       CONTEXT_MISSING_BEGIN,
-      CONTEXT_MISSING_END
+      CONTEXT_MISSING_END,
+      CONTEXT_TOO_MANY_INHERITS
     } type;
     union { uint32_t offset; Own<char*> name; };
   };
@@ -335,9 +342,8 @@ struct Parser
   ctx_id _find_ctx(class_id);
   bool _check_and_do_rule(
     Rule& r,
-    list<Unit>& out,
-    uint32_t start,
-    uint32_t end
+    Pack<Unit>& out,
+    list<Rule::Pt>& pt_buffer
   );
   // just loads [s.start, s.start+s.len[ U {0} into buff
   //   surround is used to add "\\b" around a regex string 
@@ -388,7 +394,7 @@ struct Parser
     rules.destroy();
     rulesets_classes.destroy();
     rulesets_rules.destroy();
-
+    ctxs.destroy();
   }
 };
 

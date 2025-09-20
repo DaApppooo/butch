@@ -23,6 +23,41 @@
 #endif
 
 
+template <class InitIterator, class Output>
+struct TreeIter
+{
+  using II = InitIterator;
+  using O = Output;
+  InitIterator _v;
+  void(*_next)(InitIterator&);
+  constexpr inline InitIterator & operator ++ () { _next(_v); }
+  constexpr inline InitIterator begin() { return *this; }
+  constexpr inline InitIterator end() { return {_v.end()}; }
+  constexpr inline Output& operator * () { return *_v; }
+  constexpr inline bool operator == (TreeIter<II, O> other)
+  { return _v == other._v; }
+  constexpr inline bool operator != (TreeIter<II, O> other)
+  { return _v != other._v; }
+  constexpr inline bool operator < (TreeIter<II, O> other)
+  { return _v < other._v; }
+};
+
+template <class T = uint32_t>
+struct Range
+{
+  uint32_t _i;
+  uint32_t _end;
+  constexpr inline Range& operator ++ () { _i++; return *this; }
+  constexpr inline Range begin() { return *this; }
+  constexpr inline Range end() { return {_end, _end}; }
+  constexpr inline bool operator == (Range<T> other)
+  { return _i == other._i && _end == other._end; }
+  constexpr inline bool operator != (Range<T> other)
+  { return _i != other._i || _end != other._end; }
+  constexpr inline bool operator < (Range<T> other)
+  { return _i < other._i; }
+};
+
 template <class T>
 struct View
 {
@@ -41,6 +76,16 @@ struct View
   { return {const_cast<mut_T>(start), len}; }
   View<T> shorten(int start_off, int end_off)
   { return View<T>(start+start_off, len-start_off-end_off); }
+  View<T> slice(int sub_start, int sub_len)
+  { return View<T>(start+sub_start, sub_len); }
+  constexpr inline View<T>& operator ++ () { start++; len--; return *this; }
+  constexpr inline T& operator * () { return *start; }
+  constexpr inline View<T> begin() { return *this; }
+  constexpr inline View<T> end() { return View(start+len, start+len); }
+  constexpr inline bool operator < (View<T> other)
+  { return start < other.start; }
+  constexpr inline TreeIter<View<T>, T> iter_with(void(*f)(View<T>&))
+  { return TreeIter{*this, f}; }
 };
 template <>
 struct View<char>
@@ -69,6 +114,8 @@ bool operator == (const View<T> a, const View<T> b)
   if (a.len != b.len) return false;
   return memcmp(a.start, b.start, a.len*sizeof(T)) == 0;
 }
+
+template <class T> struct Pack;
 
 template <class T> class list
 {
@@ -106,6 +153,7 @@ public:
   inline Self copy() const;
   inline Self& rmv(int index);
   inline View<T> to_view() const;
+  inline Pack<T> to_pack() const;
   inline View<T> slice(int start, int len);
   Self& rmv_range(std::initializer_list<int> start_end);
   inline Self& clear();
@@ -154,6 +202,22 @@ public:
   //   // Copying memory with length bytes.
   //   return *(list<char>*)&ret;
   // }
+};
+
+template <class T>
+struct Pack
+{
+  using Self = Pack<T>;
+  list<T> _data;
+  uint32_t start;
+  uint32_t len;
+  T* data() {  _data.data() + start; }
+  T& operator [] (uint32_t index)
+  { return _data.atp(start+index); }
+  Self& insert(T element, uint32_t index)
+  { _data.insert(element, start + index); len++; }
+  View<T> to_view() const
+  { return _data.slice(start, len); }
 };
 
 #define GEN template <class T>
@@ -419,6 +483,11 @@ GEN Self& list<T>::rmv_range(std::initializer_list<int> start_end)
 GEN inline View<T> list<T>::to_view() const
 {
   return View<T>(_data, len());
+}
+
+GEN inline DynamicView<T> list<T>::to_dyn_view() const
+{
+  return {._data = *this, .start = 0, .len = len()};
 }
 
 // Object is not destroyed !!!

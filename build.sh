@@ -9,6 +9,10 @@ then
   g++ $SRC -o readtest -g || exit 1
   ./readtest ./test.butch ./test.code
   valgrind --tool=callgrind --callgrind-out-file=callgrind.output ./readtest test.butch test.code || exit 1
+elif [[ $1 = "san" ]];
+then
+  g++ $SRC -o readtest -g --sanitize=address || exit 1
+  ./readtest ./test.butch ./test.code
 elif [[ $1 = "db" ]];
 then
   # simple gdb
