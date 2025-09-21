@@ -179,6 +179,24 @@ Rule::MatchDescriptor Rule::_match_rgx(
   return Rule::TOTAL_FAILURE;
 }
 
+void _butch_split_token(
+  Parser& p,
+  Pack<Unit>& out, // offseted pack
+  Rule::MatchDescriptor match,
+  u32 rule_idx
+) {
+  const u32 initial_length = out[0].str_len;
+  const u32 pre_len = match.str_begin - out[0].str_begin;
+  const u32 post_len = initial_length - pre_len - match.str_len;
+  const u32 post_start = match.str_begin+match.str_len;
+  out[0].str_len = pre_len;
+  out.insert(Unit(rule_idx, match.str_begin, match.str_len, 0), 1);
+  if (post_len > 0 && !p._is_to_be_trimmed(post_start, post_len))
+    out.insert(Unit(Unit::LITERAL, post_start, post_len, 0), 2);
+  if (pre_len == 0 || p._is_to_be_trimmed(out[0].str_begin, pre_len))
+    out.rmv(0);
+}
+
 Rule::MatchDescriptor Rule::_match_context(
   Parser& p,
   Pack<Unit>& units,
@@ -190,16 +208,22 @@ Rule::MatchDescriptor Rule::_match_context(
   Rule::MatchDescriptor m;
   state = units.save();
   m = p.rules[ctx.begin[0]]._sequence_match(p, units.set(0, 1), u);
-  
-  if (!m.matched || )
+  if (!m.matched)
     return _butch_failure(
       u,
       p.rulesets_rules.data()+ruleset_start,
       input_len
     );
-  list<uint8_t> depth;
+  list<u8> depth; // indicies in the ctx.begin and ctx.end
   depth.init();
   depth.push(0);
+  if (p.rules[ctx.begin[0]].is_token)
+    _butch_split_token(p, units, m, ctx.begin[0]);
+  u32 end;
+  while (depth.len() > 0)
+  {
+    
+  }
 }
 
 Rule::MatchDescriptor Rule::_sequence_match(
@@ -211,6 +235,7 @@ Rule::MatchDescriptor Rule::_sequence_match(
 #define RPTR_OFFSET(INDEX,OFF) \
 (p.rulesets_rules.data()+ruleset_start+u.atn(INDEX).r + OFF)
 #define CPTR(INDEX) (p.rulesets_classes.data()+ruleset_start+u.atn(INDEX).r)
+#define NEXT(UU) _next(UU, units.to_view())
 #define FAIL \
   if ( \
     _butch_failure(u, \
@@ -286,7 +311,7 @@ Rule::MatchDescriptor Rule::_sequence_match(
         break;
       case DOT:
         u[-1].r++;
-        _next(u[-1].u, units);
+        NEXT(u[-1].u);
         break;
       case PLUS:
         {
@@ -312,11 +337,11 @@ Rule::MatchDescriptor Rule::_sequence_match(
           break;
         }
       case STRING:
-        if (ret.include(_match_str(p, units, u, *CPTR(-1))))
+        if (ret.include(_match_str(p, units.to_view(), u, *CPTR(-1))))
           return failure;
         break;
       case REGEX:
-        if (ret.include(_match_rgx(p, units, u, *CPTR(-1))))
+        if (ret.include(_match_rgx(p, units.to_view(), u, *CPTR(-1))))
           return failure;
         break;
       case CONTEXT:
@@ -334,7 +359,7 @@ Rule::MatchDescriptor Rule::_sequence_match(
           )) {
             ret.include(units[u[-1].u]);
             u[-1].r++;
-            _next(u[-1].u, units);
+            NEXT(u[-1].u);
           }
           else
             FAIL;
@@ -346,7 +371,7 @@ Rule::MatchDescriptor Rule::_sequence_match(
         } else {
           ret.include(units[u[-1].u]);
           u[-1].r++;
-          _next(u[-1].u, units);
+          NEXT(u[-1].u);
         }
         break;
     }
@@ -354,6 +379,7 @@ Rule::MatchDescriptor Rule::_sequence_match(
   if (u[-1].r < input_len || u[-1].u < units.len)
     return failure;
   return ret;
+#undef NEXT
 #undef RPTR
 #undef RPTR_OFFSET
 #undef CPTR
@@ -379,7 +405,7 @@ bool Parser::_check_and_do_rule(
 ) {
   Rule::MatchDescriptor match;
   bool did_something = false;
-  const uint32_t rule_idx = &r - rules.data();
+  const rule_id rule_idx = &r - rules.data();
   bool test;
   auto out_iter = [&out](Range<u32>& i){ _next(i, out.to_view()); };
   Pack<Unit>::State state;
@@ -401,26 +427,9 @@ bool Parser::_check_and_do_rule(
         out.reset(state);
         if (match.matched)
         {
-          const uint32_t initial_length = out[i].str_len;
-          const uint32_t pre_len = match.str_begin - out[i].str_begin;
-          out[i].str_len = pre_len;
-          out.insert(Unit(rule_idx, match.str_begin, match.str_len, 0), i+1);
-          if (
-             initial_length - pre_len - match.str_len > 0
-          && !(_is_to_be_trimmed(
-                match.str_begin+match.str_len,
-                initial_length - pre_len - match.str_len
-              ))
-          ) {
-            out.insert(Unit(
-              Unit::LITERAL,
-              match.str_begin+match.str_len,
-              initial_length - pre_len - match.str_len,
-              0
-            ), i+2);
-          }
-          if (pre_len == 0 || _is_to_be_trimmed(out[i].str_begin, pre_len))
-            out.rmv(i);
+          state = out.save();
+          _butch_split_token(*this, out.set(i, out.len), match, rule_idx);
+          out.reset(state);
           did_something = true;
         }
       }

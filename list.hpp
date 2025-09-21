@@ -32,7 +32,7 @@ struct TreeIter
   using Self = TreeIter<II, O>;
   InitIterator _v;
   std::function<void(InitIterator&)> _next;
-  constexpr inline InitIterator & operator ++ () { _next(_v); }
+  constexpr inline Self& operator ++ () { _next(_v); return *this; }
   constexpr inline Self begin() { return *this; }
   constexpr inline Self end() { return {_v.end()}; }
   constexpr inline Output& operator * () { return *_v; }
@@ -243,7 +243,7 @@ struct Pack
   void reset(State s)
   { start = s.s; len = s.l; }
   Self& rmv(int i)
-  { _data.rmv(i); len--; }
+  { _data.rmv(start+i); len--; }
   list<T>& ls() const { return _data; }
   constexpr inline Range<decltype(len)> range() const
   { return Range<decltype(len)>{start, len}; }
