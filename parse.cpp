@@ -1,5 +1,6 @@
 #include "butch.hpp"
 #include "list.hpp"
+#include <functional>
 #include <regex.h>
 #include <cctype>
 #include "stuff.hpp"
@@ -180,14 +181,16 @@ Rule::MatchDescriptor Rule::_match_rgx(
 
 Rule::MatchDescriptor Rule::_match_context(
   Parser& p,
-  list<Unit>& units_list,
-  View<Unit>& units_view,
+  Pack<Unit>& units,
   list<Rule::Pt>& u,
   ctx_id cid
 ) {
   const Context& ctx = p.ctxs[cid];
-  Rule::MatchDescriptor m =
-    p.rules[ctx.begin[0]]._sequence_match(p, units.shorten(0, 1), u);
+  Pack<Unit>::State state;
+  Rule::MatchDescriptor m;
+  state = units.save();
+  m = p.rules[ctx.begin[0]]._sequence_match(p, units.set(0, 1), u);
+  
   if (!m.matched || )
     return _butch_failure(
       u,
@@ -201,7 +204,7 @@ Rule::MatchDescriptor Rule::_match_context(
 
 Rule::MatchDescriptor Rule::_sequence_match(
   Parser& p,
-  DynamicView<Unit>& units,
+  Pack<Unit>& units,
   list<Pt>& u
 ) {
 #define RPTR(INDEX) (p.rulesets_rules.data()+ruleset_start+u.atn(INDEX).r)
@@ -378,6 +381,8 @@ bool Parser::_check_and_do_rule(
   bool did_something = false;
   const uint32_t rule_idx = &r - rules.data();
   bool test;
+  auto out_iter = [&out](Range<u32>& i){ _next(i, out.to_view()); };
+  Pack<Unit>::State state;
 
   // char c = classes[r.out].fix();
   // printf("%s : %i:%i\n", classes[r.out].start, start, end);
@@ -387,18 +392,19 @@ bool Parser::_check_and_do_rule(
     return false; // this is an alias
   else if (r.is_token) {
     // token (no peeping can happen here)
-    for (out.to_view().iter_with(UITER))
+    for (u32 i : out.range().iter_with(out_iter))
     {
       if (out[i].id == Unit::LITERAL)
       {
-        match = r._sequence_match(*this, out.slice(i, 1), seq_match_stack);
+        state = out.save();
+        match = r._sequence_match(*this, out.set(i, 1), pt_buffer);
+        out.reset(state);
         if (match.matched)
         {
           const uint32_t initial_length = out[i].str_len;
           const uint32_t pre_len = match.str_begin - out[i].str_begin;
           out[i].str_len = pre_len;
           out.insert(Unit(rule_idx, match.str_begin, match.str_len, 0), i+1);
-          end++;
           if (
              initial_length - pre_len - match.str_len > 0
           && !(_is_to_be_trimmed(
@@ -412,15 +418,10 @@ bool Parser::_check_and_do_rule(
               initial_length - pre_len - match.str_len,
               0
             ), i+2);
-            end++;
           }
           if (pre_len == 0 || _is_to_be_trimmed(out[i].str_begin, pre_len))
-          {
             out.rmv(i);
-            end--;
-          }
           did_something = true;
-          // debug_output(stdout, out.to_view());
         }
       }
     }
@@ -428,13 +429,13 @@ bool Parser::_check_and_do_rule(
   else
   {
     // top-class abstract syntax node type
-    for (uint32_t i = start; i < end-1; _next(i, out.to_view()))
+    for (u32 i : out.to_view().shorten(0, 1).range().iter_with(out_iter))
     {
-      uint32_t j = i;
-      _next(j, out.to_view());
-      while (j <= end)
+      for (u32 j : Range<u32>::init(i, out.len))
       {
-        match = r._sequence_match(*this, out.slice(i, j-i), seq_match_stack);
+        state = out.save();
+        match = r._sequence_match(*this, out.set(i, j-i), pt_buffer);
+        out.reset(state);
         if (match.matched)
         {
           out.insert(
@@ -445,8 +446,6 @@ bool Parser::_check_and_do_rule(
             i+match.u_begin
           );
           did_something = true;
-          end++;
-          // printf("%i <-> %i\n", match.u_begin, (int)match.u_end);
         }
         _next(j, out.to_view());
       }
@@ -457,8 +456,10 @@ bool Parser::_check_and_do_rule(
 
 list<Unit> Parser::parse(Ref<char*> s)
 {
-  list<Unit> out;
+  Pack<Unit> out;
+  list<Rule::Pt> pt_buffer;
   out.init();
+  pt_buffer.init();
   parsed_code = s;
 
   out.push(Unit(Unit::LITERAL, 0, str_len(s), 0));
@@ -473,13 +474,13 @@ list<Unit> Parser::parse(Ref<char*> s)
     for (uint32_t i = 0; i < global_end; i++)
     {
       did_something =
-        _check_and_do_rule(rules[i], out, 0, out.len())
+        _check_and_do_rule(rules[i], out, pt_buffer)
         || did_something;
     }
     if (!did_something) break;
   }
 
-  return out;
+  return out.ls();
 }
 
 

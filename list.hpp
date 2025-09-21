@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #ifndef H_LIST
 #define H_LIST
 #include <cassert>
@@ -28,34 +29,45 @@ struct TreeIter
 {
   using II = InitIterator;
   using O = Output;
+  using Self = TreeIter<II, O>;
   InitIterator _v;
-  void(*_next)(InitIterator&);
+  std::function<void(InitIterator&)> _next;
   constexpr inline InitIterator & operator ++ () { _next(_v); }
-  constexpr inline InitIterator begin() { return *this; }
-  constexpr inline InitIterator end() { return {_v.end()}; }
+  constexpr inline Self begin() { return *this; }
+  constexpr inline Self end() { return {_v.end()}; }
   constexpr inline Output& operator * () { return *_v; }
-  constexpr inline bool operator == (TreeIter<II, O> other)
+  constexpr inline bool operator == (Self other)
   { return _v == other._v; }
-  constexpr inline bool operator != (TreeIter<II, O> other)
+  constexpr inline bool operator != (Self other)
   { return _v != other._v; }
-  constexpr inline bool operator < (TreeIter<II, O> other)
+  constexpr inline bool operator < (Self other)
   { return _v < other._v; }
 };
 
 template <class T = uint32_t>
 struct Range
 {
-  uint32_t _i;
-  uint32_t _end;
-  constexpr inline Range& operator ++ () { _i++; return *this; }
-  constexpr inline Range begin() { return *this; }
-  constexpr inline Range end() { return {_end, _end}; }
+  using Self = Range<T>;
+  T _i;
+  T _end;
+  static constexpr inline Range<T> init(T start, T end)
+  { return {start, end}; }
+  constexpr inline Self& operator ++ () { _i++; return *this; }
+  constexpr inline Self begin() { return *this; }
+  constexpr inline Self end() { return {_end, _end}; }
+  constexpr inline T& operator * () { return _i; }
   constexpr inline bool operator == (Range<T> other)
   { return _i == other._i && _end == other._end; }
   constexpr inline bool operator != (Range<T> other)
   { return _i != other._i || _end != other._end; }
   constexpr inline bool operator < (Range<T> other)
   { return _i < other._i; }
+  constexpr inline operator T& () const { return _i; }
+  constexpr inline operator T& () { return _i; }
+  constexpr inline TreeIter<Range<T>, T> iter_with(
+    std::function<void(Range<T>&)> f
+  ) const
+  { return TreeIter<Range<T>, T>{*this, f}; }
 };
 
 template <class T>
@@ -79,13 +91,16 @@ struct View
   View<T> slice(int sub_start, int sub_len)
   { return View<T>(start+sub_start, sub_len); }
   constexpr inline View<T>& operator ++ () { start++; len--; return *this; }
-  constexpr inline T& operator * () { return *start; }
-  constexpr inline View<T> begin() { return *this; }
-  constexpr inline View<T> end() { return View(start+len, start+len); }
-  constexpr inline bool operator < (View<T> other)
+  constexpr inline T& operator * () const { return *start; }
+  constexpr inline View<T> begin() const { return *this; }
+  constexpr inline View<T> end() const
+  { return View(start+len, start+len); }
+  constexpr inline bool operator < (View<T> other) const
   { return start < other.start; }
-  constexpr inline TreeIter<View<T>, T> iter_with(void(*f)(View<T>&))
+  constexpr inline TreeIter<View<T>, T> iter_with(void(*f)(View<T>&)) const
   { return TreeIter{*this, f}; }
+  constexpr inline Range<decltype(len)> range() const
+  { return Range<decltype(len)>{0, len}; }
 };
 template <>
 struct View<char>
@@ -208,16 +223,30 @@ template <class T>
 struct Pack
 {
   using Self = Pack<T>;
+  struct State { uint32_t s; uint32_t l; };
   list<T> _data;
   uint32_t start;
   uint32_t len;
+  void init() { _data.init(); start = len = 0; }
   T* data() {  _data.data() + start; }
   T& operator [] (uint32_t index)
   { return _data.atp(start+index); }
   Self& insert(T element, uint32_t index)
   { _data.insert(element, start + index); len++; }
+  Self& push(T element)
+  { _data.push(element); len++; }
   View<T> to_view() const
   { return _data.slice(start, len); }
+  State save() { }
+  Pack<T>& set(uint32_t start_, uint32_t len_)
+  { start = start_; len = len_; return *this; }
+  void reset(State s)
+  { start = s.s; len = s.l; }
+  Self& rmv(int i)
+  { _data.rmv(i); len--; }
+  list<T>& ls() const { return _data; }
+  constexpr inline Range<decltype(len)> range() const
+  { return Range<decltype(len)>{start, len}; }
 };
 
 #define GEN template <class T>
@@ -483,11 +512,6 @@ GEN Self& list<T>::rmv_range(std::initializer_list<int> start_end)
 GEN inline View<T> list<T>::to_view() const
 {
   return View<T>(_data, len());
-}
-
-GEN inline DynamicView<T> list<T>::to_dyn_view() const
-{
-  return {._data = *this, .start = 0, .len = len()};
 }
 
 // Object is not destroyed !!!
