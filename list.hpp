@@ -52,6 +52,8 @@ struct Range
   T _end;
   static constexpr inline Range<T> init(T start, T end)
   { return {start, end}; }
+  static constexpr inline Range<T> init(T end)
+  { return {0, end}; }
   constexpr inline Self& operator ++ () { _i++; return *this; }
   constexpr inline Self begin() { return *this; }
   constexpr inline Self end() { return {_end, _end}; }
@@ -71,6 +73,13 @@ struct Range
 };
 
 template <class T>
+constexpr inline Range<T> range(T start, T end)
+{ return Range<T>::init(start, end); }
+template <class T>
+constexpr inline Range<T> range(T end)
+{ return Range<T>::init(end); }
+
+template <class T>
 struct View
 {
   using mut_T = std::remove_const<T>;
@@ -88,7 +97,7 @@ struct View
   { return {const_cast<mut_T>(start), len}; }
   View<T> shorten(int start_off, int end_off)
   { return View<T>(start+start_off, len-start_off-end_off); }
-  View<T> slice(int sub_start, int sub_len)
+  View<T> slice(int sub_start, int sub_len) const
   { return View<T>(start+sub_start, sub_len); }
   constexpr inline View<T>& operator ++ () { start++; len--; return *this; }
   constexpr inline T& operator * () const { return *start; }
@@ -97,6 +106,8 @@ struct View
   { return View(start+len, start+len); }
   constexpr inline bool operator < (View<T> other) const
   { return start < other.start; }
+  constexpr inline bool operator != (View<T> other) const
+  { return start != other.start; }
   constexpr inline TreeIter<View<T>, T> iter_with(void(*f)(View<T>&)) const
   { return TreeIter{*this, f}; }
   constexpr inline Range<decltype(len)> range() const
@@ -115,6 +126,8 @@ struct View<char>
   { if (index < 0) index += len; return start[index]; }
   View<char>& operator = (const View<char>& v)
   { start = v.start; len = v.len; return *this; }
+  constexpr inline bool operator == (const View<char>& v)
+  { return !(len != v.len || memcmp(start, v.start, len)); }
   char fix() const
   { char tmp = start[len]; start[len] = 0; return tmp; }
   void mov(char c) const
@@ -169,7 +182,7 @@ public:
   inline Self& rmv(int index);
   inline View<T> to_view() const;
   inline Pack<T> to_pack() const;
-  inline View<T> slice(int start, int len);
+  inline View<T> slice(int start, int len) const;
   Self& rmv_range(std::initializer_list<int> start_end);
   inline Self& clear();
   inline Self& swap(int idx_a, int idx_b);
@@ -232,19 +245,20 @@ struct Pack
   T& operator [] (uint32_t index)
   { return _data.atp(start+index); }
   Self& insert(T element, uint32_t index)
-  { _data.insert(element, start + index); len++; }
+  { _data.insert(element, start + index); len++; return *this; }
   Self& push(T element)
-  { _data.push(element); len++; }
+  { _data.push(element); len++; return *this; }
   View<T> to_view() const
   { return _data.slice(start, len); }
-  State save() { }
+  State save() { return {start, len}; }
   Pack<T>& set(uint32_t start_, uint32_t len_)
   { start = start_; len = len_; return *this; }
   void reset(State s)
   { start = s.s; len = s.l; }
   Self& rmv(int i)
-  { _data.rmv(start+i); len--; }
+  { _data.rmv(start+i); len--; return *this; }
   list<T>& ls() const { return _data; }
+  list<T>& ls() { return _data; }
   constexpr inline Range<decltype(len)> range() const
   { return Range<decltype(len)>{start, len}; }
 };
@@ -309,7 +323,7 @@ GEN inline Self& list<T>::clear()
   _len = 0;
   return self;
 }
-GEN inline View<T> list<T>::slice(int start, int len)
+GEN inline View<T> list<T>::slice(int start, int len) const
 {
   return View<T>(_data+start, len);
 }

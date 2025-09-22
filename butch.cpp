@@ -10,7 +10,6 @@
 #define expect(X) do { assert(X); [[assume(X)]]; } while(false)
 #define ALIAS_CHAR '?'
 
-
 Own<char*> _butch_read_file(Ref<const char*> filename)
 {
   FILE* f = fopen(filename, "r");

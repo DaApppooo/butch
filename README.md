@@ -108,6 +108,7 @@ Contexts are what enables depth awareness with parenthesis, braces, brackets, st
 = PARENTHESIS
   Begin = "("
   End = ")"
+  MyCustomRuleThatAppliesOnlyBetweenParenthesis = "hello"
 ```
 > Indentation isn't necessary.
 
@@ -121,17 +122,7 @@ Call = Name ARGUMENTS
   End = ")"
 ```
 
-This kind of declaration requires the unit that should match ARGUMENTS to be a literal. But this isn't necessarily always true:
-
-```
-Name = '\w+'
-ParenthOpen = "("
-ParenthClosed = ")"
-Call = Name ARGUMENTS
-= ARGUMENTS
-  Begin = ParenthOpen
-  End = ParenthClosed
-```
+Contexts require that the unit that should match ARGUMENTS is a literal. AND it's important to note that regex matches aren't supported (only one single string match per Begin/End).
 
 The goal once a context is reached in a ruleset is to first define the start and the end of this context, then the other specified rules are ran once, in order of specification. Thus, only the `Begin` and `End` rules are tested out of order.
 

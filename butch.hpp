@@ -131,35 +131,37 @@ struct Rule
   static constexpr class_id END = -4;
   struct MatchDescriptor
   {
-    uint32_t str_begin;
-    uint32_t str_len : 31;
+    uint32_t s_start;
+    uint32_t s_len : 31;
     bool matched : 1;
     // these two fields come with (pre|post)peeping
-    uint16_t u_begin; // unit view begin (included)
+    uint16_t u_start; // unit view begin (included)
     uint16_t u_end; // unit view end (excluded)
+    constexpr inline uint32_t s_end() { return s_start+s_len; }
+    inline View<char> s_view(const Parser&);
     bool include(MatchDescriptor m)
     {
       if (!m.matched)
         return true;
-      if (m.str_len == 0)
+      if (m.s_len == 0)
         return false;
-      if (str_len == 0)
+      if (s_len == 0)
       {
-        str_begin = m.str_begin;
-        str_len = m.str_len;
+        s_start = m.s_start;
+        s_len = m.s_len;
         matched = m.matched;
         return false;
       }
-      const uint32_t os = m.str_begin;
-      const uint32_t oe = os+m.str_len;
-      uint32_t ss = str_begin;
-      uint32_t se = ss+str_len;
+      const uint32_t os = m.s_start;
+      const uint32_t oe = os+m.s_len;
+      uint32_t ss = s_start;
+      uint32_t se = ss+s_len;
       if (os < ss)
         ss = os;
       if (oe > se)
         se = oe;
-      str_begin = ss;
-      str_len = se - ss;
+      s_start = ss;
+      s_len = se - ss;
       return false;
     }
     bool include(Unit u)
@@ -172,8 +174,8 @@ struct Rule
     }
     bool operator == (MatchDescriptor o)
     { return o.matched == matched
-             && o.str_begin == str_begin
-             && o.str_len == str_len; }
+             && o.s_start == s_start
+             && o.s_len == s_len; }
   };
   static constexpr MatchDescriptor PARTIAL_FAILURE = {0, 0, true};
   static constexpr MatchDescriptor TOTAL_FAILURE = {0, 0, false};
@@ -315,7 +317,7 @@ struct Parser
   list<rule_id> rulesets_rules; // TODO: use same cap and length data for both
   list<class_id> rulesets_classes;
   string buff;
-  Ref<char*> parsed_code;
+  View<char> parsed_code;
   uint32_t flags;
   int flags_data;
 
@@ -323,7 +325,7 @@ struct Parser
     butch_code(nullptr),
     classes(),
     rules(),
-    parsed_code(nullptr),
+    parsed_code(nullptr, nullptr),
     flags(FLAG_TRIM_SPACE_LITERALS),
     flags_data(0)
   {
@@ -397,6 +399,11 @@ struct Parser
     ctxs.destroy();
   }
 };
+
+View<char> Rule::MatchDescriptor::s_view(const Parser& p)
+{
+  return View<char>(p.parsed_code.start+s_start, s_len);
+}
 
 
 
