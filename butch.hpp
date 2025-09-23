@@ -78,29 +78,29 @@ struct Parser;
 struct Unit
 {
   static constexpr rule_id LITERAL = -1; // for Unit.id
-  uint32_t str_begin;
+  uint32_t s_start;
   // number of children units following this unit in the output unit vector
   // representing a tree
   rule_id id; // points to Parser.rules
               // if id == LITERAL then this is unparsed code
-  uint32_t str_len;
+  uint32_t s_len;
   uint32_t children_len;
-  inline uint32_t str_end() const { return str_begin + str_len; }
+  inline uint32_t str_end() const { return s_start + s_len; }
   
   Unit() {}
   Unit(class_id id, uint32_t begin, uint32_t len, uint32_t children_count)
-    : str_begin(begin), id(id), str_len(len), children_len(children_count) {}
+    : s_start(begin), id(id), s_len(len), children_len(children_count) {}
   Unit(const Unit& u)
-    : str_begin(u.str_begin), id(u.id), str_len(u.str_len),
+    : s_start(u.s_start), id(u.id), s_len(u.s_len),
       children_len(u.children_len) {}
   Unit(const Unit&& u)
-    : str_begin(u.str_begin), id(u.id), str_len(u.str_len),
+    : s_start(u.s_start), id(u.id), s_len(u.s_len),
       children_len(u.children_len) {}
   constexpr Unit& operator = (const Unit& u)
-  { str_begin=u.str_begin; id=u.id; str_len=u.str_len;
+  { s_start=u.s_start; id=u.id; s_len=u.s_len;
     children_len=u.children_len; return *this; }
   constexpr Unit& operator = (const Unit&& u)
-  { str_begin=u.str_begin; id=u.id; str_len=u.str_len;
+  { s_start=u.s_start; id=u.id; s_len=u.s_len;
     children_len=u.children_len; return *this; }
 
   View<char> str(const Parser&);
@@ -167,8 +167,8 @@ struct Rule
     bool include(Unit u)
     {
       return include(MatchDescriptor{
-        u.str_begin,
-        u.str_len,
+        u.s_start,
+        u.s_len,
         true
       });
     }
@@ -279,6 +279,7 @@ struct Parser
   //       (you could use rule ordering to match "++" first)
   FLAG_T FLAG_ISOLATED_MODE_STRINGS   = 0b0010U;
   FLAG_T FLAG_ISOLATED_MODE_REGEX     = 0b0100U; // same but regex
+  FLAG_T _FLAG_START_FIXED_MATCH      = 0b1000U;
   // TODO add more flags
 #undef FLAG_T
   struct Error
@@ -351,7 +352,8 @@ struct Parser
   //   surround is used to add "\\b" around a regex string 
   const char* _load_str(
     View<char> s,
-    View<char> surround = View<char>(nullptr, nullptr)
+    View<char> surround = View<char>(nullptr, nullptr),
+    View<char> start = View<char>(nullptr, nullptr)
   );
   // same as _load but transforms "\\n" into "\n"
   const char* _comp_str(View<char> s);

@@ -45,11 +45,19 @@ View<char> _butch_eq_iso(int i, View<char> big, View<char> pattern, bool iso)
   return {nullptr, nullptr};
 }
 
-View<char> _butch_str_match(View<char> big, View<char> pattern, bool iso)
+View<char> _butch_str_match(View<char> big, View<char> pattern, u8 iso)
 {
+  assert(iso != 3);
   if (big.len < pattern.len)
     return View<char>(nullptr, nullptr);
   View<char> r;
+  if (iso == 2)
+  {
+    if (pattern == (r = View<char>(big.start, big.start+pattern.len)))
+      return r;
+    else
+     return View<char>(nullptr, nullptr);
+  }
   for (u32 i : range(0U, big.len - pattern.len))
   {
     if ((r = _butch_eq_iso(i, big, pattern, iso)).start)
@@ -67,7 +75,10 @@ View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
   const View<char> surround = flags & FLAG_ISOLATED_MODE_REGEX
                               ? View<char>((char*)"\\b", 2)
                               : View<char>(nullptr, nullptr);
-  const char* const cstr_patt = _load_str(pattern, surround);
+  const View<char> start = flags & _FLAG_START_FIXED_MATCH
+                           ? View<char>((char*)"^", 1)
+                           : View<char>(nullptr,nullptr);
+  const char* const cstr_patt = _load_str(pattern, surround, start);
   res = regcomp(&patt, cstr_patt, REG_EXTENDED);
   if (res)
   {
@@ -148,7 +159,9 @@ Rule::MatchDescriptor Rule::_match_str(
   const class_id cid
 ) {
   View<char> s;
-  const bool iso_mode = p.flags & Parser::FLAG_ISOLATED_MODE_STRINGS;
+  const bool iso_mode =
+    bool(p.flags & Parser::FLAG_ISOLATED_MODE_STRINGS)
+  | (bool(p.flags & Parser::_FLAG_START_FIXED_MATCH) << 1);
   const View<char> big = units[u[-1].u].str(p);
   const View<char> patt = p.classes[cid].shorten(1,1);
   if ((s = _butch_str_match(big, patt, iso_mode)).start)
@@ -192,15 +205,15 @@ void _butch_split_token(
   Rule::MatchDescriptor match,
   u32 rule_idx
 ) {
-  const u32 initial_length = out[0].str_len;
-  const u32 pre_len = match.s_start - out[0].str_begin;
+  const u32 initial_length = out[0].s_len;
+  const u32 pre_len = match.s_start - out[0].s_start;
   const u32 post_len = initial_length - pre_len - match.s_len;
   const u32 post_start = match.s_start+match.s_len;
-  out[0].str_len = pre_len;
+  out[0].s_len = pre_len;
   out.insert(Unit(rule_idx, match.s_start, match.s_len, 0), 1);
   if (post_len > 0 && !p._is_to_be_trimmed(post_start, post_len))
     out.insert(Unit(Unit::LITERAL, post_start, post_len, 0), 2);
-  if (pre_len == 0 || p._is_to_be_trimmed(out[0].str_begin, pre_len))
+  if (pre_len == 0 || p._is_to_be_trimmed(out[0].s_start, pre_len))
     out.rmv(0);
 }
 
@@ -218,6 +231,7 @@ Rule::MatchDescriptor Rule::_match_context(
   Pack<Unit>::State state;
   Rule::MatchDescriptor m;
   list<u8> depth; // indicies in the ctx.begin and ctx.end
+  u32 off, unit_s_start;
   if (units[0].id != Unit::LITERAL)
     return BUTCH_FAIL;
   assert(p.rules.atp(ctx.begin[0]).is_token);
@@ -225,10 +239,10 @@ Rule::MatchDescriptor Rule::_match_context(
   assert(p.rules.atp(ctx.end[0]).is_token);
   assert(p.rules.atn(ctx.end[0]).input_len == 1);
   LD_BEGIN(0);
-  m.s_start = units[0].str_begin;
+  m.s_start = units[0].s_start;
   m.s_len = p.buff.len();
-  m.u_start = 
-  state = units.save();
+  m.u_start = units.start;
+  m.u_end = units.start+units.len;
   depth.init();
   while (m.s_end() <= p.parsed_code.len)
   {
@@ -236,10 +250,34 @@ Rule::MatchDescriptor Rule::_match_context(
       break;
     m.s_start++;
   }
+  if (m.s_end() > p.parsed_code.len)
+    return BUTCH_FAIL;
+  if (m.s_start > units[0].s_start)
+  {
+    units.insert(
+      Unit(
+        Unit::LITERAL,
+        units[0].s_start,
+        m.s_start - units[0].s_start,
+        0
+      ), 0
+    );
+    units[1].s_start = m.s_start+m.s_len;
+  }
+  depth.push(0);
+  off = m.s_start+1;
+  // we temporarily enable _FLAG_START_FIXED_MATCH
+  p.flags |= p._FLAG_START_FIXED_MATCH;
   while (depth.len() > 0)
   {
-    
+    for (u32 i : range(ctx.be_count))
+    {
+      
+    }
+    off++;
   }
+  p.flags &= ~p._FLAG_START_FIXED_MATCH;
+  return m;
 }
 
 Rule::MatchDescriptor Rule::_sequence_match(
@@ -531,7 +569,7 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     if (ls[i].id != Unit::LITERAL && rules[ls[i].id].is_token)
       fprintf(f, "'%s'\n", _load_str(ls[i].str(*this)));
     else
-      fprintf(f, "[%i:+%i]\n", ls[i].str_begin, ls[i].str_len);
+      fprintf(f, "[%i:+%i]\n", ls[i].s_start, ls[i].s_len);
     if (ls[i].children_len > 0)
     {
       depth_stack[depth_pt++] = ls[i].children_len+1;

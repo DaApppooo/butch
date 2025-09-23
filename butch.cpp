@@ -34,7 +34,7 @@ Own<char*> _butch_allocpy_view(const View<char> v)
 
 View<char> Unit::str(const Parser& p)
 {
-  return View<char>(p.parsed_code+str_begin, str_len);
+  return View<char>(p.parsed_code+s_start, s_len);
 }
 
 bool Unit::is(const Parser& p, const View<char> s)
@@ -55,18 +55,26 @@ bool Unit::is(const Parser& p, const View<char> s)
     return id == rid;
 }
 
-const char* Parser::_load_str(View<char> s, View<char> surround)
-{
+const char* Parser::_load_str(
+  View<char> s,
+  View<char> surround,
+  View<char> start
+) {
   expect(s.len > 0); // undefined behavior otherwise
   expect(bool(surround.start) != (surround.len == 0));
-  if (buff._cap < s.len+1+surround.len*2)
-    buff.prealloc(s.len+1);
+  if (buff._cap < s.len+1+surround.len*2+start.len)
+    buff.prealloc(s.len+1+surround.len*2+start.len);
+  if (start.start)
+    memcpy(buff.data(), start.start, start.len);
   if (surround.start)
-    memcpy(buff.data(), surround.start, surround.len);
-  memcpy(buff.data()+surround.len, s.start, s.len);
+    memcpy(buff.data()+start.len, surround.start, surround.len);
+  memcpy(buff.data()+start.len+surround.len, s.start, s.len);
   if (surround.start)
-    memcpy(buff.data()+s.len+surround.len, surround.start, surround.len);
-  buff.data()[s.len+surround.len*2] = 0;
+    memcpy(
+      buff.data()+start.len+s.len+surround.len,
+      surround.start, surround.len
+    );
+  buff.data()[start.len+s.len+surround.len*2] = 0;
   return buff.data();
 }
 

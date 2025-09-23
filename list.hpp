@@ -236,7 +236,7 @@ template <class T>
 struct Pack
 {
   using Self = Pack<T>;
-  struct State { uint32_t s; uint32_t l; };
+  struct State { uint32_t s; uint32_t l; uint32_t il; };
   list<T> _data;
   uint32_t start;
   uint32_t len;
@@ -250,11 +250,14 @@ struct Pack
   { _data.push(element); len++; return *this; }
   View<T> to_view() const
   { return _data.slice(start, len); }
-  State save() { return {start, len}; }
-  Pack<T>& set(uint32_t start_, uint32_t len_)
-  { start = start_; len = len_; return *this; }
+  State set(uint32_t start_, uint32_t len_)
+  {
+    const State ret = {start, len, len_};
+    start = start_; len = len_;
+    return ret;
+  }
   void reset(State s)
-  { start = s.s; len = s.l; }
+  { start = s.s; len = s.l+(len-s.il); }
   Self& rmv(int i)
   { _data.rmv(start+i); len--; return *this; }
   list<T>& ls() const { return _data; }
