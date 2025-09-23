@@ -47,7 +47,7 @@ View<char> _butch_eq_iso(int i, View<char> big, View<char> pattern, bool iso)
 
 View<char> _butch_str_match(View<char> big, View<char> pattern, u8 iso)
 {
-  assert(iso != 3);
+  assert(iso < 3);
   if (big.len < pattern.len)
     return View<char>(nullptr, nullptr);
   View<char> r;
@@ -103,8 +103,7 @@ constexpr void _butch_units_next(View<Unit>& units)
 inline void _next(u32& i, View<Unit> units)
 { i += units[i].children_len+1; }
 
-
-Rule::MatchDescriptor _butch_failure(
+Match _butch_failure(
   list<Rule::Pt>& u,
   rule_id* in,
   int rule_len
@@ -152,7 +151,7 @@ Rule::MatchDescriptor _butch_failure(
       input_len \
     )
 
-Rule::MatchDescriptor Rule::_match_str(
+Match Rule::_match_str(
   const Parser& p,
   View<Unit> units,
   list<Pt>& u,
@@ -177,7 +176,7 @@ Rule::MatchDescriptor Rule::_match_str(
   return Rule::TOTAL_FAILURE;
 }
 
-Rule::MatchDescriptor Rule::_match_rgx(
+Match Rule::_match_rgx(
   Parser& p,
   View<Unit> units,
   list<Pt>& u,
@@ -202,7 +201,7 @@ Rule::MatchDescriptor Rule::_match_rgx(
 void _butch_split_token(
   Parser& p,
   Pack<Unit>& out, // offseted pack
-  Rule::MatchDescriptor match,
+  Match match,
   u32 rule_idx
 ) {
   const u32 initial_length = out[0].s_len;
@@ -217,7 +216,7 @@ void _butch_split_token(
     out.rmv(0);
 }
 
-Rule::MatchDescriptor Rule::_match_context(
+Match Rule::_match_context(
   Parser& p,
   Pack<Unit>& units,
   list<Rule::Pt>& u,
@@ -229,58 +228,69 @@ Rule::MatchDescriptor Rule::_match_context(
   
   const Context& ctx = p.ctxs[cid];
   Pack<Unit>::State state;
-  Rule::MatchDescriptor m;
+  Match m, sub_m;
   list<u8> depth; // indicies in the ctx.begin and ctx.end
-  u32 off, unit_s_start;
+  list<Rule::Pt> sub_u;
+  u32 unit_s_start;
   if (units[0].id != Unit::LITERAL)
     return BUTCH_FAIL;
   assert(p.rules.atp(ctx.begin[0]).is_token);
   assert(p.rules.atn(ctx.begin[0]).input_len == 1);
   assert(p.rules.atp(ctx.end[0]).is_token);
   assert(p.rules.atn(ctx.end[0]).input_len == 1);
-  LD_BEGIN(0);
-  m.s_start = units[0].s_start;
-  m.s_len = p.buff.len();
-  m.u_start = units.start;
-  m.u_end = units.start+units.len;
   depth.init();
-  while (m.s_end() <= p.parsed_code.len)
-  {
-    if (m.s_view(p) == p.buff.to_view())
-      break;
-    m.s_start++;
-  }
-  if (m.s_end() > p.parsed_code.len)
-    return BUTCH_FAIL;
-  if (m.s_start > units[0].s_start)
-  {
-    units.insert(
-      Unit(
-        Unit::LITERAL,
-        units[0].s_start,
-        m.s_start - units[0].s_start,
-        0
-      ), 0
-    );
-    units[1].s_start = m.s_start+m.s_len;
-  }
-  depth.push(0);
-  off = m.s_start+1;
+  sub_u.init();
   // we temporarily enable _FLAG_START_FIXED_MATCH
   p.flags |= p._FLAG_START_FIXED_MATCH;
+  state = units.set(0, 1);
+  m = p.rules[ctx.begin[0]]._sequence_match(p, units, sub_u);
+  assert(m.s_start == units[0].s_start);
+  if (!m.matched)
+  {
+    p.flags &= ~p._FLAG_START_FIXED_MATCH;
+    return BUTCH_FAIL;
+  }
+  depth.push(0);
+  unit_s_start = units[0].s_start;
+  const u32 units_s_end = unit_s_start + units[0].s_len;
   while (depth.len() > 0)
   {
-    for (u32 i : range(ctx.be_count))
+    for (u8 i : range(ctx.be_count))
     {
-      
+      sub_m = p.rules[ctx.end[i]]._sequence_match(p, units, sub_u);
+      if (sub_m.matched)
+      {
+        if (depth.atn(-1) != i)
+        {
+          units[0].id = Unit::ERROR_CONTEXT_MISMATCH;
+          goto FINISH;
+        }
+        depth.pop();
+        units[0].s_start += sub_m.s_len-1;
+        break;
+      }
+      sub_m = p.rules[ctx.begin[i]]._sequence_match(p, units, sub_u);
+      if (sub_m.matched)
+      {
+        depth.push(i);
+        units[0].s_start += sub_m.s_len-1;
+        break;
+      }
     }
-    off++;
+    units[0].s_start++;
+    if (units[0].s_start >= units_s_end)
+    { assert(false); /* TODO */ }
   }
+FINISH:
+  units[0].s_start = unit_s_start;
+  units.reset(state);
   p.flags &= ~p._FLAG_START_FIXED_MATCH;
+  sub_u.destroy();
+  depth.destroy();
   return m;
 }
 
-Rule::MatchDescriptor Rule::_sequence_match(
+Match Rule::_sequence_match(
   Parser& p,
   Pack<Unit>& units,
   list<Pt>& u
@@ -298,9 +308,9 @@ Rule::MatchDescriptor Rule::_sequence_match(
   ) == TOTAL_FAILURE) \
     return failure;
   
-  constexpr MatchDescriptor failure = TOTAL_FAILURE;
+  constexpr Match failure = TOTAL_FAILURE;
   expect(units.len > 0);
-  MatchDescriptor ret = {
+  Match ret = {
     .s_start = units[-1].str_end(),
     .s_len=0,
     .matched=true,
@@ -457,7 +467,7 @@ bool Parser::_check_and_do_rule(
   Pack<Unit>& out,
   list<Rule::Pt>& pt_buffer
 ) {
-  Rule::MatchDescriptor match;
+  Match match;
   bool did_something = false;
   const rule_id rule_idx = &r - rules.data();
   bool test;
@@ -476,13 +486,13 @@ bool Parser::_check_and_do_rule(
     {
       if (out[i].id == Unit::LITERAL)
       {
-        state = out.save();
-        match = r._sequence_match(*this, out.set(i, 1), pt_buffer);
+        state = out.set(i, 1);
+        match = r._sequence_match(*this, out, pt_buffer);
         out.reset(state);
         if (match.matched)
         {
-          state = out.save();
-          _butch_split_token(*this, out.set(i, out.len), match, rule_idx);
+          state = out.set(i, out.len);
+          _butch_split_token(*this, out, match, rule_idx);
           out.reset(state);
           did_something = true;
         }
@@ -496,8 +506,8 @@ bool Parser::_check_and_do_rule(
     {
       for (u32 j : Range<u32>::init(i, out.len))
       {
-        state = out.save();
-        match = r._sequence_match(*this, out.set(i, j-i), pt_buffer);
+        state = out.set(i, j-i);
+        match = r._sequence_match(*this, out, pt_buffer);
         out.reset(state);
         if (match.matched)
         {

@@ -99,7 +99,8 @@ Where `?MyAlias` is an alternative name for the classes `Option1`, `Option2`, an
 Because this code will "compile", but when trying to parse code it will loop indefinitely.
 
 Aliases aren't classes in the sense that a unit cannot have an alias as its class. Aliases are only useful when you want to abreviate `(Option1 | Option2 | ...)` and/or avoid redunduncy. And because they require a much less complex pattern matching logic they're also faster.
--->
+
+> Note that aliases with only one element are "true aliases" in the sense that they're only a renaming of the element.
 
 ### Contexts [TODO]
 
@@ -122,11 +123,13 @@ Call = Name ARGUMENTS
   End = ")"
 ```
 
-Contexts require that the unit that should match ARGUMENTS is a literal. AND it's important to note that regex matches aren't supported (only one single string match per Begin/End).
+The goal once a context is reached in a ruleset is to first define the start and the end of this context, then the other specified rules are ran over and over again, until none match (or all the rules are tried `Parser.rule_test_max` times if the value is greater than 0), in order of specification. Thus, only the `Begin` and `End` rules are tested out of order.
 
-The goal once a context is reached in a ruleset is to first define the start and the end of this context, then the other specified rules are ran once, in order of specification. Thus, only the `Begin` and `End` rules are tested out of order.
+Contexts require that the unit that should match ARGUMENTS is a literal. The literal is first analyzed character by character, while trying to find groups of `Begin` and `End`. If an `End` is found with no matching `Begin` (this can happen with mixed contexts, see further down below), the task of matching the context fails, and the unit is tagged with `Unit::ERROR_CONTEXT_MISMATCH` as its id, instead of `Unit::LITERAL`. Also, the `Begin` and `End` rules have the special property that they only match at the begining of the literal. That is, with regexes, it's equivalent as adding a `^` at the begining of your pattern.
 
-Depth awareness can also mix multiple context begin and end for a single context. For example, you could imagine that you want a specific context for parenthesis, braces and brackets, and that a mix of these three can be contained in each of them. Here's how you'd write that:
+> Note: `^` and `$` in regexes are supposed to mean begin and end of literal, contrary to the standard "begin and end of a line" (the implementation can ignore this rule, although it is discouraged).
+
+Depth awareness can also mix multiple context begins and ends for a single context (that's mixed contexts). For example, you could imagine that you want a specific context for parenthesis, braces and brackets, and that a mix of these three can be contained in each of them. Here's how you'd write that:
 
 ```
 = PARENTHESIS : BRACES BRACKETS
@@ -140,8 +143,47 @@ Depth awareness can also mix multiple context begin and end for a single context
   End = "]"
 ```
 
+Sometimes it can be useful to include rules of other contexts within the current context without having to rewrite it. Here's an example of how to do that:
 
+```
+= PARENTHESIS : BRACES
+  Begin = "("
+  End = ")"
+  Separator = ","
+= BRACES : PARENTHESIS
+  Begin = "{"
+  End = "}"
+  + Separator
+```
 
+You can write `+ <OutputClassName>` to copy the rule of another context within the current context. The referenced rule must alredy exist, and the first rule found with the given output class will be selected. The output class of the newly created rule will be the exact same as the copied one. You can also chain multiple elements after the `+` separating each by a space: `+ MyClass1 MyClass2 MyClass3 ...`. In this case, classes are copied in order of declaration, from left to right.
+
+> Note that contexts aren't scopes for rules. Rules present within a context can be freely accessed from any other contexts.
+
+In case you want to copy an entire context, you can simply use the context name, or for the global context you can just use `+` and end the line there. Here's a more complex example:
+
+```
+Name = '[a-zA-Z_][a-zA-Z0-9_]*'
+Int = '[-+]?[0-9]+'
+StatementEnd = ";"
+Eq = "="
+Indexing = Name BRACKETS
+?Type = Name Indexing # simple type or array of a type
+?Atom = Name Indexing Int
+?Variable = ?Type # for some weird reason here it happens to be the same
+VarDecl = ?Type Name
+Assignement = ?Variable Eq ?Atom
+Statement = VarDecl StatementEnd
+= PARENTHESIS : BRACKETS
+  Begin = "("
+  End = ")"
+  + Name Int VarDecl
+= BRACKETS : PARENTHESIS
+  Begin = "["
+  End = "]"
+  +
+  + PARENTHESIS
+```
 
 
 

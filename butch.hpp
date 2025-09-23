@@ -1,12 +1,11 @@
+#ifndef H_BUTCH
+#define H_BUTCH
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
 #include <type_traits>
 #include "list.hpp"
-
-
-
 
 enum ResultType { OK, ERR };
 template <class Ok = int, class Err = int>
@@ -75,9 +74,11 @@ using rule_id = int32_t;
 using class_id = int32_t;
 using ctx_id = int32_t;
 struct Parser;
+#define FLAG_T static constexpr uint32_t
 struct Unit
 {
   static constexpr rule_id LITERAL = -1; // for Unit.id
+  static constexpr rule_id ERROR_CONTEXT_MISMATCH = -2;
   uint32_t s_start;
   // number of children units following this unit in the output unit vector
   // representing a tree
@@ -107,6 +108,55 @@ struct Unit
   bool is(const Parser&, const View<char> s);
 };
 
+struct Match
+{
+  uint32_t s_start;
+  uint32_t s_len : 31;
+  bool matched : 1;
+  // these two fields come with (pre|post)peeping
+  uint16_t u_start; // unit view begin (included)
+  uint16_t u_end; // unit view end (excluded)
+  constexpr inline uint32_t s_end() { return s_start+s_len; }
+  inline View<char> s_view(const Parser&);
+  bool include(Match m)
+  {
+    if (!m.matched)
+      return true;
+    if (m.s_len == 0)
+      return false;
+    if (s_len == 0)
+    {
+      s_start = m.s_start;
+      s_len = m.s_len;
+      matched = m.matched;
+      return false;
+    }
+    const uint32_t os = m.s_start;
+    const uint32_t oe = os+m.s_len;
+    uint32_t ss = s_start;
+    uint32_t se = ss+s_len;
+    if (os < ss)
+      ss = os;
+    if (oe > se)
+      se = oe;
+    s_start = ss;
+    s_len = se - ss;
+    return false;
+  }
+  bool include(Unit u)
+  {
+    return include(Match{
+      u.s_start,
+      u.s_len,
+      true
+    });
+  }
+  bool operator == (Match o)
+  { return o.matched == matched
+           && o.s_start == s_start
+           && o.s_len == s_len; }
+};
+
 struct Rule
 {
   struct Pt
@@ -129,56 +179,9 @@ struct Rule
   static constexpr class_id ALIAS = -2;
   static constexpr class_id BEGIN = -3;
   static constexpr class_id END = -4;
-  struct MatchDescriptor
-  {
-    uint32_t s_start;
-    uint32_t s_len : 31;
-    bool matched : 1;
-    // these two fields come with (pre|post)peeping
-    uint16_t u_start; // unit view begin (included)
-    uint16_t u_end; // unit view end (excluded)
-    constexpr inline uint32_t s_end() { return s_start+s_len; }
-    inline View<char> s_view(const Parser&);
-    bool include(MatchDescriptor m)
-    {
-      if (!m.matched)
-        return true;
-      if (m.s_len == 0)
-        return false;
-      if (s_len == 0)
-      {
-        s_start = m.s_start;
-        s_len = m.s_len;
-        matched = m.matched;
-        return false;
-      }
-      const uint32_t os = m.s_start;
-      const uint32_t oe = os+m.s_len;
-      uint32_t ss = s_start;
-      uint32_t se = ss+s_len;
-      if (os < ss)
-        ss = os;
-      if (oe > se)
-        se = oe;
-      s_start = ss;
-      s_len = se - ss;
-      return false;
-    }
-    bool include(Unit u)
-    {
-      return include(MatchDescriptor{
-        u.s_start,
-        u.s_len,
-        true
-      });
-    }
-    bool operator == (MatchDescriptor o)
-    { return o.matched == matched
-             && o.s_start == s_start
-             && o.s_len == s_len; }
-  };
-  static constexpr MatchDescriptor PARTIAL_FAILURE = {0, 0, true};
-  static constexpr MatchDescriptor TOTAL_FAILURE = {0, 0, false};
+
+  static constexpr Match PARTIAL_FAILURE = {0, 0, true};
+  static constexpr Match TOTAL_FAILURE = {0, 0, false};
   uint32_t ruleset_start;
   uint32_t input_len;
   class_id out;
@@ -200,24 +203,24 @@ struct Rule
     return self;
   }
 
-  MatchDescriptor _sequence_match(
+  Match _sequence_match(
     Parser&,
     Pack<Unit>&,
     list<Pt>&
   );
-  MatchDescriptor _match_str(
+  Match _match_str(
     const Parser&,
     View<Unit>,
     list<Pt>&,
     const class_id
   );
-  MatchDescriptor _match_rgx(
+  Match _match_rgx(
     Parser&,
     View<Unit>,
     list<Pt>&,
     const class_id
   );
-  MatchDescriptor _match_context(
+  Match _match_context(
     Parser& p,
     Pack<Unit>& units,
     list<Rule::Pt>& u,
@@ -265,7 +268,6 @@ Use the parser to parse your custom language with:
 */
 struct Parser
 {
-#define FLAG_T static constexpr uint32_t
   FLAG_T FLAG_TRIM_SPACE_LITERALS     = 0b0001U;
   // Equivalent to surrounding the string with regex's \b
   // (you can't do that in butch)
@@ -281,7 +283,6 @@ struct Parser
   FLAG_T FLAG_ISOLATED_MODE_REGEX     = 0b0100U; // same but regex
   FLAG_T _FLAG_START_FIXED_MATCH      = 0b1000U;
   // TODO add more flags
-#undef FLAG_T
   struct Error
   {
     enum Type {
@@ -337,8 +338,25 @@ struct Parser
   }
 
   static Result<Own<Parser>, Error> read(Own<char*> s);
-  static Result<Own<Parser>, Error> read_file(Ref<const char*> filename)
+  static inline Result<Own<Parser>, Error> read_file(
+    Ref<const char*> filename
+  )
   { return Parser::read(_butch_read_file(filename)); }
+  void debug(FILE* f);
+  void debug_output(FILE* f, const View<Unit> ls);
+  Own<list<Unit>> parse(Ref<char*> s);
+  FileParse parse_file(Ref<const char*> filename)
+  {
+    char* code = _butch_read_file(filename);
+    if (code == nullptr)
+    {
+      list<Unit> err;
+      err.init();
+      return {nullptr, err};
+    }
+    auto ret = parse(code);
+    return {code, ret};
+  }
   Error::Type _make_rule(Rule& r, Ref<char*>& s);
   class_id _find_or_make_class(View<char>);
   rule_id _find_rule(class_id);
@@ -361,21 +379,6 @@ struct Parser
   bool _is_to_be_trimmed(uint32_t begin, uint32_t len);
   RulePack operator [] (int index)
   { return {classes[index], rules[index]}; }
-  void debug(FILE* f);
-  void debug_output(FILE* f, const View<Unit> ls);
-  Own<list<Unit>> parse(Ref<char*> s);
-  FileParse parse_file(Ref<const char*> filename)
-  {
-    char* code = _butch_read_file(filename);
-    if (code == nullptr)
-    {
-      list<Unit> err;
-      err.init();
-      return {nullptr, err};
-    }
-    auto ret = parse(code);
-    return {code, ret};
-  }
   constexpr inline
   bool is_rule(const Rule& r, int index, std::initializer_list<rule_id> tests)
   {
@@ -402,10 +405,10 @@ struct Parser
   }
 };
 
-View<char> Rule::MatchDescriptor::s_view(const Parser& p)
+inline View<char> Match::s_view(const Parser& p)
 {
   return View<char>(p.parsed_code.start+s_start, s_len);
 }
 
-
-
+#undef FLAG_T
+#endif

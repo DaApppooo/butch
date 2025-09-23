@@ -253,7 +253,7 @@ struct Pack
   State set(uint32_t start_, uint32_t len_)
   {
     const State ret = {start, len, len_};
-    start = start_; len = len_;
+    start += start_; len = len_;
     return ret;
   }
   void reset(State s)
