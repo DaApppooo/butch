@@ -34,7 +34,7 @@ Own<char*> _butch_allocpy_view(const View<char> v)
 
 View<char> Unit::str(const Parser& p)
 {
-  return View<char>(p.parsed_code+s_start, s_len);
+  return View<char>(p.parsed_code.start+s_start, s_len);
 }
 
 bool Unit::is(const Parser& p, const View<char> s)

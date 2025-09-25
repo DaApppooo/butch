@@ -346,7 +346,12 @@ void Parser::debug(FILE* f)
     {
       const Context& ctx = ctxs[ctid];
       c = classes[ctx.name].fix();
-      fprintf(f, "= %s\n", classes[ctx.name].start);
+      fprintf(f,
+        "= %s (%04i, %04i)\n",
+        classes[ctx.name].start,
+        ctx.begin[0],
+        ctx.end[0]
+      );
       classes[ctx.name].mov(c);
       k_end = k + ctx.rule_count;
     }
@@ -395,6 +400,8 @@ void Parser::debug(FILE* f)
       }
       if (r.is_alias)
         fprintf(f, " (alias)");
+      if (r.is_token)
+        fprintf(f, " (token)");
       fprintf(f, "\n");
     }
   }
