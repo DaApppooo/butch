@@ -185,9 +185,4 @@ Statement = VarDecl StatementEnd
   + PARENTHESIS
 ```
 
-
-
-
-
-
-
+> Specifying both `Name` and `VarDecl` in the `PARENTHESIS` context is useless, because dependencies are resolved, so only specifying `VarDecl` would also copy `Name` (and it has the side effect of also copying `Indexing`). 
