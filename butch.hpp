@@ -85,15 +85,17 @@ struct Unit
   rule_id id; // points to Parser.rules
               // if id == LITERAL then this is unparsed code
   uint32_t s_len;
-  uint32_t children_len;
+  uint16_t children_len;
+  int16_t ctx; // >= 0 only if id == -1
   inline uint32_t str_end() const { return s_start + s_len; }
   
   Unit() {}
   Unit(class_id id, uint32_t begin, uint32_t len, uint32_t children_count)
-    : s_start(begin), id(id), s_len(len), children_len(children_count) {}
+    : s_start(begin), id(id), s_len(len), children_len(children_count),
+      ctx(-1) {}
   Unit(const Unit& u)
     : s_start(u.s_start), id(u.id), s_len(u.s_len),
-      children_len(u.children_len) {}
+      children_len(u.children_len), ctx(u.ctx) {}
   Unit(const Unit&& u)
     : s_start(u.s_start), id(u.id), s_len(u.s_len),
       children_len(u.children_len) {}

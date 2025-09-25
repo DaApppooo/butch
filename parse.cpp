@@ -230,7 +230,7 @@ Match Rule::_match_context(
   p._comp_str(p.classes[p.in_class(p.rules[ctx.begin[0]], 0)]);
   
   const Context& ctx = p.ctxs[cid];
-  Pack<Unit>::State state, sub_state;
+  Pack<Unit>::State state;
   Match m, sub_m;
   list<u8> depth; // indicies in the ctx.begin and ctx.end
   list<Rule::Pt> sub_u;
@@ -239,26 +239,28 @@ Match Rule::_match_context(
   if (units[0].id != Unit::LITERAL)
     return BUTCH_FAIL;
   assert(p.rules.atp(ctx.begin[0]).is_token);
-  assert(p.rules.atn(ctx.begin[0]).input_len == 1);
+  // assert(p.rules.atn(ctx.begin[0]).input_len == 1);
   assert(p.rules.atp(ctx.end[0]).is_token);
-  assert(p.rules.atn(ctx.end[0]).input_len == 1);
+  // assert(p.rules.atn(ctx.end[0]).input_len == 1);
   depth.init();
   sub_u.init();
   // we temporarily enable _FLAG_START_FIXED_MATCH
   p.flags |= p._FLAG_START_FIXED_MATCH;
   state = units.set(u.atn(-1).u, 1);
   m = p.rules[ctx.begin[0]]._sequence_match(p, units, sub_u);
-  assert(m.s_start == units[0].s_start);
   if (!m.matched)
   {
     p.flags &= ~p._FLAG_START_FIXED_MATCH;
+    units.reset(state);
     return BUTCH_FAIL;
   }
+  assert(m.s_start == units[0].s_start);
   depth.push(0);
   units_s_start = units[0].s_start;
   const u32 units_s_end = units_s_start + units[0].s_len;
   while (depth.len() > 0)
   {
+    printf("depth: %i\n", depth.len());
     for (u8 i : range(ctx.be_count))
     {
       sub_m = p.rules[ctx.end[i]]._sequence_match(p, units, sub_u);
@@ -290,11 +292,12 @@ Match Rule::_match_context(
     }
   }
   // successfuly matched
-  units.insert(Unit(
+  units.insert(Unit( // unit that's englobing everything
     Unit::LITERAL, units_s_start,
-    units_s_end - units_s_start,
+    sub_m.s_start + sub_m.s_len - units_s_start,
     1 // will be updated at the end
   ), 0);
+  units[0].ctx = cid;
   units[1].s_start = m.s_end();
   units[1].s_len -= sub_m.s_len;
   did_something = true;
@@ -311,6 +314,21 @@ Match Rule::_match_context(
                     || did_something;
     }
   }
+  m.u_end =
+    (units.ls()[units.start-1].children_len = units.len_diff(state));
+  units.reset(state);
+  m = Match{
+    .s_start = units_s_start,
+    .s_len = units_s_end - units_s_start,
+    .u_start = u16(u[-1].u),
+    .u_end = m.u_end
+  };
+  u[-1].r++;
+  _next(u[-1].u, units.to_view());
+  p.flags &= ~p._FLAG_START_FIXED_MATCH;
+  sub_u.destroy();
+  depth.destroy();
+  return m;
 FAILURE:
   units[0].s_start = units_s_start;
   units.reset(state);
@@ -350,10 +368,10 @@ Match Rule::_sequence_match(
   bool not_flag = false;
   u.clear();
   u.push({0, 0}).push({0, 0});
-  // printf("===== Rule %s : units.len=%u =====\n",
-  //        p._load_str(p.classes[out]),
-  //        units.len
-  // );
+  printf("===== Rule %s : units.len=%u =====\n",
+         p._load_str(p.classes[out]),
+         units.len
+  );
   // p.debug_output(stdout, units);
   // puts("=== vvv ===");
   while (u[-1].r < input_len && u[-1].u < units.len)
@@ -460,7 +478,6 @@ Match Rule::_sequence_match(
         }
         else if (units[u[-1].u].id != *RPTR(-1))
         {
-          printf("%u != %u\n", units[u[-1].u].id, *RPTR(-1));
           FAIL;
         } else {
           ret.include(units[u[-1].u]);
@@ -505,8 +522,10 @@ bool Parser::_check_and_do_rule(
   Pack<Unit>::State state;
 
   // char c = classes[r.out].fix();
-  // printf("%s : %i:%i\n", classes[r.out].start, start, end);
+  // printf("%s\n", classes[r.out].start);
   // classes[r.out].mov(c);
+
+  assert(!(flags & _FLAG_START_FIXED_MATCH)); // TEMP
 
   if (r.is_alias)
     return false; // this is an alias
@@ -532,9 +551,9 @@ bool Parser::_check_and_do_rule(
   else
   {
     // top-class abstract syntax node type
-    for (u32 i : out.to_view().shorten(0, 1).range().iter_with(out_iter))
+    for (u32 i : out.to_view().range().iter_with(out_iter))
     {
-      for (u32 j : range(i+1, out.len).iter_with(out_iter))
+      for (u32 j : range(i+out[i].children_len+1, out.len+2).iter_with(out_iter))
       {
         state = out.set(i, j-i);
         match = r._sequence_match(*this, out, pt_buffer);
@@ -591,6 +610,7 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
 {
   int8_t depth_pt = 0;
   int32_t depth_stack[127];
+  char c;
   for (int i = 0; i < ls.len; i++)
   {
     for (int j = 0; j < depth_pt; j++)
@@ -598,6 +618,13 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     const View<char> s =
       ls[i].id == Unit::LITERAL ? ls[i].str(*this)
                                 : classes[rules[ls[i].id].out];
+    if (ls[i].ctx >= 0)
+    {
+      const class_id cid = ctxs[ls[i].ctx].name;
+      c = classes[cid].fix();
+      printf("(%s)", classes[cid].start);
+      classes[cid].mov(c);
+    }
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
     for (int j = 0; j < s.len; j++)

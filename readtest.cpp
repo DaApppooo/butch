@@ -132,6 +132,7 @@ int main(int argc, const char** argv)
     fprintf(stderr, "Failed to open file_to_parse: '%s'\n", argv[2]);
     return 1;
   }
+  puts("=== Output: ===");
   p.debug_output(stdout, fp.units.to_view());
   free(fp.parsed_code);
   p.destroy();

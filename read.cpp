@@ -269,6 +269,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
           if (ctid == GLOBAL_CONTEXT)
             ERROR_CN(Error::UNDECLARED_RULE, cids[j]);
           rids[j] = Rule::CONTEXT;
+          cids[j] = ctid;
         }
         else
           rids[j] = find_test;
@@ -390,6 +391,11 @@ void Parser::debug(FILE* f)
               break;
           }
           fprintf(f, "%s", p);
+        } else if (in_rule(r, i) == Rule::CONTEXT) {
+          const class_id cid = ctxs[in_class(r, i)].name;
+          c = classes[cid].fix();
+          fprintf(f, " %s", classes[cid].start);
+          classes[cid].mov(c);
         } else {
           c = classes[in_class(r, i)].fix();
           fprintf(f, " %s", classes[in_class(r, i)].start);

@@ -59,9 +59,9 @@ struct Range
   constexpr inline Self end() { return {_end, _end}; }
   constexpr inline T& operator * () { return _i; }
   constexpr inline bool operator == (Range<T> other)
-  { return _i == other._i && _end == other._end; }
+  { return _i == other._i; }
   constexpr inline bool operator != (Range<T> other)
-  { return _i != other._i || _end != other._end; }
+  { return _i < other._i; }
   constexpr inline bool operator < (Range<T> other)
   { return _i < other._i; }
   constexpr inline operator T& () const { return _i; }
@@ -107,7 +107,7 @@ struct View
   constexpr inline bool operator < (View<T> other) const
   { return start < other.start; }
   constexpr inline bool operator != (View<T> other) const
-  { return start != other.start; }
+  { return start < other.start; }
   constexpr inline TreeIter<View<T>, T> iter_with(void(*f)(View<T>&)) const
   { return TreeIter{*this, f}; }
   constexpr inline Range<decltype(len)> range() const
@@ -256,6 +256,8 @@ struct Pack
     start += start_; len = len_;
     return ret;
   }
+  int len_diff(State s)
+  { return len - s.il; }
   void reset(State s)
   { start = s.s; len = s.l+(len-s.il); }
   Self& rmv(int i)
