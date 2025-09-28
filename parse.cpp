@@ -299,7 +299,7 @@ Match Rule::_match_context(
   ), 0);
   units[0].ctx = cid;
   units[1].s_start = m.s_end();
-  units[1].s_len -= sub_m.s_len;
+  units[1].s_len -= sub_m.s_len + m.s_len;
   did_something = true;
   units.reset(state);
   state = units.set(u[-1].u+1, 1);
@@ -314,8 +314,8 @@ Match Rule::_match_context(
                     || did_something;
     }
   }
-  m.u_end =
-    (units.ls()[units.start-1].children_len = units.len_diff(state));
+  m.u_end = u[-1].u +
+    (units.ls()[units.start-1].children_len = 1 + units.len_diff(state));
   units.reset(state);
   m = Match{
     .s_start = units_s_start,
@@ -323,6 +323,7 @@ Match Rule::_match_context(
     .u_start = u16(u[-1].u),
     .u_end = m.u_end
   };
+  printf("%i -> %i\n", (i32)m.u_start, (i32)m.u_end);
   u[-1].r++;
   _next(u[-1].u, units.to_view());
   p.flags &= ~p._FLAG_START_FIXED_MATCH;
@@ -369,10 +370,10 @@ Match Rule::_sequence_match(
   u.clear();
   u.push({0, 0}).push({0, 0});
   printf("===== Rule %s : units.len=%u =====\n",
-         p._load_str(p.classes[out]),
+         out > 0 ? p._load_str(p.classes[out]) : "Begin/End",
          units.len
   );
-  // p.debug_output(stdout, units);
+  p.debug_output(stdout, units.to_view());
   // puts("=== vvv ===");
   while (u[-1].r < input_len && u[-1].u < units.len)
   {
@@ -521,9 +522,9 @@ bool Parser::_check_and_do_rule(
   auto out_iter = [&out](Range<u32>& i){ _next(i, out.to_view()); };
   Pack<Unit>::State state;
 
-  // char c = classes[r.out].fix();
-  // printf("%s\n", classes[r.out].start);
-  // classes[r.out].mov(c);
+  char c = classes[r.out].fix();
+  printf("%s\n", classes[r.out].start);
+  classes[r.out].mov(c);
 
   assert(!(flags & _FLAG_START_FIXED_MATCH)); // TEMP
 
@@ -555,6 +556,7 @@ bool Parser::_check_and_do_rule(
     {
       for (u32 j : range(i+out[i].children_len+1, out.len+2).iter_with(out_iter))
       {
+        assert(j > i);
         state = out.set(i, j-i);
         match = r._sequence_match(*this, out, pt_buffer);
         out.reset(state);

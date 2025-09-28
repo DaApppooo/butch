@@ -1,20 +1,10 @@
 
 
-Elif = "elif"
-If = "if"
-# Else = "else"
-Then = "then"
-Name = '\w+'
-Int = '[0-9]+'
-
-?Atom = Condition Name Int
-?Condit = If Elif
 
 Group = GROUP
 
-Condition = ?Condit ?Atom Then ?Atom
 
 = GROUP
-  Begin = "("
-  End = ")"
+  Begin = "(("
+  End = "))"
 
