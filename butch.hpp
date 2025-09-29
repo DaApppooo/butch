@@ -87,7 +87,7 @@ struct Unit
   uint32_t s_len;
   uint16_t children_len;
   int16_t ctx; // >= 0 only if id == -1
-  inline uint32_t str_end() const { return s_start + s_len; }
+  inline uint32_t s_end() const { return s_start + s_len; }
   
   Unit() {}
   Unit(class_id id, uint32_t begin, uint32_t len, uint32_t children_count)
@@ -98,13 +98,13 @@ struct Unit
       children_len(u.children_len), ctx(u.ctx) {}
   Unit(const Unit&& u)
     : s_start(u.s_start), id(u.id), s_len(u.s_len),
-      children_len(u.children_len) {}
+      children_len(u.children_len), ctx(u.ctx) {}
   constexpr Unit& operator = (const Unit& u)
   { s_start=u.s_start; id=u.id; s_len=u.s_len;
-    children_len=u.children_len; return *this; }
+    children_len=u.children_len; ctx = u.ctx; return *this; }
   constexpr Unit& operator = (const Unit&& u)
   { s_start=u.s_start; id=u.id; s_len=u.s_len;
-    children_len=u.children_len; return *this; }
+    children_len=u.children_len; ctx = u.ctx; return *this; }
 
   View<char> str(const Parser&);
   bool is(const Parser&, const View<char> s);
@@ -191,7 +191,6 @@ struct Rule
   bool is_alias : 1;
   bool has_prepeep : 1;
   bool has_postpeep : 1;
-  bool are_inputs_owned : 1;
   static Rule init()
   {
     Rule self;
@@ -201,7 +200,6 @@ struct Rule
       = self.has_postpeep
       = self.is_alias
       = false;
-    self.are_inputs_owned = true;
     return self;
   }
 

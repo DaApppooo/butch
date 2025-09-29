@@ -1,10 +1,12 @@
 
-
-
 Group = GROUP
-
+Name = '\w+'
+Func = Name Name Group
+Decl = Name Name
 
 = GROUP
-  Begin = "(("
-  End = "))"
+  Begin = "("
+  End = ")"
+  + Name Decl
+
 

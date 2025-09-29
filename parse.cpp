@@ -158,11 +158,13 @@ Match Rule::_match_str(
   const class_id cid
 ) {
   View<char> s;
-  const bool iso_mode =
+  const u8 iso_mode =
     bool(p.flags & Parser::FLAG_ISOLATED_MODE_STRINGS)
   | (bool(p.flags & Parser::_FLAG_START_FIXED_MATCH) << 1);
   const View<char> big = units[u[-1].u].str(p);
   const View<char> patt = p.classes[cid].shorten(1,1);
+  if (units[u[-1].u].ctx != -1)
+    return BUTCH_FAIL;
   if ((s = _butch_str_match(big, patt, iso_mode)).start)
   {
     u[-1].r++;
@@ -185,6 +187,8 @@ Match Rule::_match_rgx(
   View<char> s;
   const View<char> big = units[u[-1].u].str(p);
   const View<char> patt = p.classes[cid].shorten(1,1);
+  if (units[u[-1].u].ctx != -1)
+    return BUTCH_FAIL;
   if ((s = p._rgx_match(big, patt)).start)
   {
     u[-1].r++;
@@ -236,8 +240,10 @@ Match Rule::_match_context(
   list<Rule::Pt> sub_u;
   u32 units_s_start;
   bool did_something;
-  if (units[0].id != Unit::LITERAL)
+  if (units[u[-1].u].id != Unit::LITERAL)
     return BUTCH_FAIL;
+  if (units[u[-1].u].ctx == cid)
+    return BUTCH_FAIL; // can't return success otherwise butch is stuck in an infinite loop (when no limit is set)
   assert(p.rules.atp(ctx.begin[0]).is_token);
   // assert(p.rules.atn(ctx.begin[0]).input_len == 1);
   assert(p.rules.atp(ctx.end[0]).is_token);
@@ -245,7 +251,6 @@ Match Rule::_match_context(
   depth.init();
   sub_u.init();
   // we temporarily enable _FLAG_START_FIXED_MATCH
-  p.flags |= p._FLAG_START_FIXED_MATCH;
   state = units.set(u.atn(-1).u, 1);
   m = p.rules[ctx.begin[0]]._sequence_match(p, units, sub_u);
   if (!m.matched)
@@ -254,13 +259,14 @@ Match Rule::_match_context(
     units.reset(state);
     return BUTCH_FAIL;
   }
-  assert(m.s_start == units[0].s_start);
+  p.flags |= p._FLAG_START_FIXED_MATCH;
   depth.push(0);
   units_s_start = units[0].s_start;
   const u32 units_s_end = units_s_start + units[0].s_len;
+  units[0].s_start = m.s_start;
+  units[0].s_start += m.s_len;
   while (depth.len() > 0)
   {
-    printf("depth: %i\n", depth.len());
     for (u8 i : range(ctx.be_count))
     {
       sub_m = p.rules[ctx.end[i]]._sequence_match(p, units, sub_u);
@@ -293,16 +299,29 @@ Match Rule::_match_context(
   }
   // successfuly matched
   units.insert(Unit( // unit that's englobing everything
-    Unit::LITERAL, units_s_start,
-    sub_m.s_start + sub_m.s_len - units_s_start,
+    Unit::LITERAL, m.s_start,
+    sub_m.s_end() - m.s_start,
     1 // will be updated at the end
   ), 0);
+  if (units_s_start != m.s_start)
+  {
+    units.insert(Unit(
+      Unit::LITERAL,
+      units_s_start,
+      m.s_start - units_s_start,
+      0
+    ), 0);
+    units.start++;
+  }
   units[0].ctx = cid;
   units[1].s_start = m.s_end();
-  units[1].s_len -= sub_m.s_len + m.s_len;
+  units[1].s_len = sub_m.s_start - units[1].s_start;
   did_something = true;
   units.reset(state);
+  if (units_s_start != m.s_start)
+    units.start++;
   state = units.set(u[-1].u+1, 1);
+  p.flags &= ~p._FLAG_START_FIXED_MATCH;
   while (did_something)
   {
     did_something = false;
@@ -323,10 +342,9 @@ Match Rule::_match_context(
     .u_start = u16(u[-1].u),
     .u_end = m.u_end
   };
-  printf("%i -> %i\n", (i32)m.u_start, (i32)m.u_end);
+  // printf("%i -> %i\n" (i32)m.u_start, (i32)m.u_end);
   u[-1].r++;
   _next(u[-1].u, units.to_view());
-  p.flags &= ~p._FLAG_START_FIXED_MATCH;
   sub_u.destroy();
   depth.destroy();
   return m;
@@ -360,7 +378,7 @@ Match Rule::_sequence_match(
   constexpr Match failure = TOTAL_FAILURE;
   expect(units.len > 0);
   Match ret = {
-    .s_start = units[units.len-1].str_end(),
+    .s_start = units[units.len-1].s_end(),
     .s_len=0,
     .matched=true,
     .u_start=0,
@@ -369,17 +387,17 @@ Match Rule::_sequence_match(
   bool not_flag = false;
   u.clear();
   u.push({0, 0}).push({0, 0});
-  printf("===== Rule %s : units.len=%u =====\n",
-         out > 0 ? p._load_str(p.classes[out]) : "Begin/End",
-         units.len
-  );
-  p.debug_output(stdout, units.to_view());
+  // printf("===== Rule %s : units.len=%u =====\n",
+  //        out >= 0 ? p._load_str(p.classes[out]) : "Begin/End",
+  //        units.len
+  // );
+  // p.debug_output(stdout, units.to_view());
   // puts("=== vvv ===");
   while (u[-1].r < input_len && u[-1].u < units.len)
   {
     // printf(">>> |u|=%u u[-1]={.r=%i,.u=%i}\n",
     //   u.len(),
-    //   u[-1].r,
+      //   u[-1].r,
     //   u[-1].u
     // );
     if (not_flag)

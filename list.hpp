@@ -265,7 +265,7 @@ struct Pack
   list<T>& ls() const { return _data; }
   list<T>& ls() { return _data; }
   constexpr inline Range<decltype(len)> range() const
-  { return Range<decltype(len)>{start, len}; }
+  { return Range<decltype(len)>{0, len}; }
 };
 
 #define GEN template <class T>

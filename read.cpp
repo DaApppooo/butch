@@ -200,7 +200,32 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     }
     else if (*s == '+')
     {
-      assert(false); // TODO
+      s++;
+      SKIP_SPACES_ONLY;
+      do
+      {
+        start = s;
+        while (!isspace(*s))
+          s++;
+        class_name = View<char>(start, s);
+        const class_id cid = self._find_or_make_class(class_name);
+        const rule_id rid = self._find_rule(cid);
+        if (rid == Rule::UNKNOWN_RULE)
+        {
+          const ctx_id ctid = self._find_ctx(cid);
+          assert(false); // TODO
+        }
+        else
+        {
+          // TODO : dependecies
+          self.rules.push(Rule::init());
+          self.rules.atn(-1) = self.rules[rid];
+          if (cctx >= 0)
+            self.ctxs[cctx].rule_count++;
+        }
+        SKIP_SPACES_ONLY;
+      } while (*s != '\n');
+      continue;
     }
 
     { // class name (and parent class)
@@ -243,6 +268,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   // resolve rules with Rule.in_rule(x) == UNKNOWN_RULE
   rule_id* rids = self.rulesets_rules.data();
   class_id* cids = self.rulesets_classes.data();
+  rule_id prev = -1;
   for (uint32_t i = 0; i < self.rules.len(); i++)
   {
     Rule& r = self.rules[i];
@@ -279,8 +305,12 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       if (!self.is_rule(r, j, {Rule::STRING, Rule::REGEX, Rule::PIPE}))
         r.is_token = false;
     }
-    rids += r.input_len;
-    cids += r.input_len;
+    if (prev < r.ruleset_start)
+    {
+      rids += r.input_len;
+      cids += r.input_len;
+    }
+    prev = r.ruleset_start;
   }
 
   // Resolve contexts
