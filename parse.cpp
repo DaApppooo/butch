@@ -238,7 +238,7 @@ Match Rule::_match_context(
   Match m, sub_m;
   list<u8> depth; // indicies in the ctx.begin and ctx.end
   list<Rule::Pt> sub_u;
-  u32 units_s_start;
+  u32 units_s_start, ctx_content_len;
   bool did_something;
   if (units[u[-1].u].id != Unit::LITERAL)
     return BUTCH_FAIL;
@@ -298,12 +298,25 @@ Match Rule::_match_context(
     }
   }
   // successfuly matched
-  units.insert(Unit( // unit that's englobing everything
-    Unit::LITERAL, m.s_start,
-    sub_m.s_end() - m.s_start,
-    1 // will be updated at the end
-  ), 0);
-  if (units_s_start != m.s_start)
+  ctx_content_len = sub_m.s_start - m.s_end();
+  if (ctx_content_len > 0)
+  {
+    units.insert(Unit( // unit that's englobing everything
+      Unit::LITERAL, m.s_start,
+      sub_m.s_end() - m.s_start,
+      1 // will be updated at the end
+    ), 0);
+    units[0].ctx = cid;
+    units[1].s_start = m.s_end();
+    units[1].s_len = ctx_content_len;
+  }
+  else
+  {
+    units[0].s_start = m.s_start;
+    units[0].s_len = sub_m.s_end() - m.s_start;
+    units[0].ctx = cid;
+  }
+  if (units_s_start < m.s_start)
   {
     units.insert(Unit(
       Unit::LITERAL,
@@ -312,11 +325,9 @@ Match Rule::_match_context(
       0
     ), 0);
     units.start++;
+    u[-1].u++;
   }
-  units[0].ctx = cid;
-  units[1].s_start = m.s_end();
-  units[1].s_len = sub_m.s_start - units[1].s_start;
-  did_something = true;
+  did_something = ctx_content_len > 0;
   units.reset(state);
   if (units_s_start != m.s_start)
     units.start++;
@@ -339,6 +350,8 @@ Match Rule::_match_context(
   m = Match{
     .s_start = units_s_start,
     .s_len = units_s_end - units_s_start,
+    .matched = true,
+    .with_offset = true,
     .u_start = u16(u[-1].u),
     .u_end = m.u_end
   };
@@ -381,6 +394,7 @@ Match Rule::_sequence_match(
     .s_start = units[units.len-1].s_end(),
     .s_len=0,
     .matched=true,
+    .with_offset=false,
     .u_start=0,
     .u_end=(uint16_t)units.len
   };
@@ -391,7 +405,7 @@ Match Rule::_sequence_match(
   //        out >= 0 ? p._load_str(p.classes[out]) : "Begin/End",
   //        units.len
   // );
-  // p.debug_output(stdout, units.to_view());
+  // p.debug_output(stdout, units.ls().to_view());
   // puts("=== vvv ===");
   while (u[-1].r < input_len && u[-1].u < units.len)
   {
@@ -585,7 +599,7 @@ bool Parser::_check_and_do_rule(
                  match.s_start, match.s_len,
                  match.u_end-match.u_start
             ),
-            i+match.u_start
+            i+match.u_start+match.with_offset
           );
           did_something = true;
         }

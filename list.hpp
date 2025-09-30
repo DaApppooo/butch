@@ -44,6 +44,35 @@ struct TreeIter
   { return _v < other._v; }
 };
 
+template <class T = int32_t>
+struct DirRange
+{
+  using Self = DirRange<T>;
+  T _i;
+  T _end;
+  int dir;
+  static constexpr inline Self init(T start, T end, int dir)
+  { return {start, dir, end}; }
+  static constexpr inline Self init(T end)
+  { return {0, 1, end}; }
+  constexpr inline Self& operator ++ () { _i+=dir; return *this; }
+  constexpr inline Self begin() { return *this; }
+  constexpr inline Self end() { return {_end, _end, dir,}; }
+  constexpr inline T& operator * () { return _i; }
+  constexpr inline bool operator == (Self other)
+  { return _i == other._i; }
+  constexpr inline bool operator != (Self other)
+  { return _i*dir < other._i*dir; }
+  constexpr inline bool operator < (Self other)
+  { return _i*dir < other._i*dir; }
+  constexpr inline operator T& () const { return _i; }
+  constexpr inline operator T& () { return _i; }
+  constexpr inline TreeIter<Self, T> iter_with(
+    std::function<void(Self&)> f
+  ) const
+  { return TreeIter<Self, T>{*this, f}; }
+};
+
 template <class T = uint32_t>
 struct Range
 {
@@ -66,6 +95,12 @@ struct Range
   { return _i < other._i; }
   constexpr inline operator T& () const { return _i; }
   constexpr inline operator T& () { return _i; }
+  constexpr inline DirRange<T> reverse_if(bool cond)
+  {
+    if (!cond)
+      return DirRange<T>::init(_i, _end, 1);
+    return DirRange<T>::init(_end, _i, -1);
+  }
   constexpr inline TreeIter<Range<T>, T> iter_with(
     std::function<void(Range<T>&)> f
   ) const
@@ -75,6 +110,9 @@ struct Range
 template <class T>
 constexpr inline Range<T> range(T start, T end)
 { return Range<T>::init(start, end); }
+template <class T>
+constexpr inline DirRange<T> range(T start, T end, int step)
+{ return DirRange<T>::init(start, end, step); }
 template <class T>
 constexpr inline Range<T> range(T end)
 { return Range<T>::init(end); }

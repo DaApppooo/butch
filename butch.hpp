@@ -113,8 +113,9 @@ struct Unit
 struct Match
 {
   uint32_t s_start;
-  uint32_t s_len : 31;
+  uint32_t s_len : 30;
   bool matched : 1;
+  bool with_offset : 1;
   // these two fields come with (pre|post)peeping
   uint16_t u_start; // unit view begin (included)
   uint16_t u_end; // unit view end (excluded)
@@ -126,6 +127,7 @@ struct Match
       return true;
     if (m.s_len == 0)
       return false;
+    with_offset = m.with_offset;
     if (s_len == 0)
     {
       s_start = m.s_start;
@@ -182,8 +184,8 @@ struct Rule
   static constexpr class_id BEGIN = -3;
   static constexpr class_id END = -4;
 
-  static constexpr Match PARTIAL_FAILURE = {0, 0, true};
-  static constexpr Match TOTAL_FAILURE = {0, 0, false};
+  static constexpr Match PARTIAL_FAILURE = {0, 0, true, false, 0, 0};
+  static constexpr Match TOTAL_FAILURE = {0, 0, false, false, 0, 0};
   uint32_t ruleset_start;
   uint32_t input_len;
   class_id out;
