@@ -1,5 +1,6 @@
 #include "butch.hpp"
 #include "list.hpp"
+#include <cstdio>
 #include <functional>
 #include <regex.h>
 #include <cctype>
@@ -220,6 +221,20 @@ void _butch_split_token(
     out.rmv(0);
 }
 
+void _debug(Parser& p, Pack<Unit>& units)
+{
+  p.debug_output(stdout, units.ls().to_view());
+}
+
+void Rule::_apply_context(
+  Parser& p,
+  Pack<Unit>& units,
+  list<Rule::Pt>& u,
+  ctx_id
+) {
+  
+}
+
 Match Rule::_match_context(
   Parser& p,
   Pack<Unit>& units,
@@ -238,7 +253,7 @@ Match Rule::_match_context(
   Match m, sub_m;
   list<u8> depth; // indicies in the ctx.begin and ctx.end
   list<Rule::Pt> sub_u;
-  u32 units_s_start, ctx_content_len;
+  u32 units_s_start, ctx_content_len, abs_index;
   bool did_something;
   if (units[u[-1].u].id != Unit::LITERAL)
     return BUTCH_FAIL;
@@ -316,6 +331,7 @@ Match Rule::_match_context(
     units[0].s_len = sub_m.s_end() - m.s_start;
     units[0].ctx = cid;
   }
+  abs_index = units.start;
   if (units_s_start < m.s_start)
   {
     units.insert(Unit(
@@ -325,13 +341,15 @@ Match Rule::_match_context(
       0
     ), 0);
     units.start++;
+    units.len--;
     u[-1].u++;
+    abs_index++;
   }
   did_something = ctx_content_len > 0;
   units.reset(state);
   if (units_s_start != m.s_start)
     units.start++;
-  state = units.set(u[-1].u+1, 1);
+  state = units.set_abs(u[-1].u+1, 1);
   p.flags &= ~p._FLAG_START_FIXED_MATCH;
   while (did_something)
   {
@@ -345,7 +363,7 @@ Match Rule::_match_context(
     }
   }
   m.u_end = u[-1].u +
-    (units.ls()[units.start-1].children_len = 1 + units.len_diff(state));
+    (units.ls()[abs_index].children_len = 1 + units.len_diff(state));
   units.reset(state);
   m = Match{
     .s_start = units_s_start,
@@ -357,7 +375,7 @@ Match Rule::_match_context(
   };
   // printf("%i -> %i\n" (i32)m.u_start, (i32)m.u_end);
   u[-1].r++;
-  _next(u[-1].u, units.to_view());
+  _next(u[-1].u, units.ls().to_view());
   sub_u.destroy();
   depth.destroy();
   return m;

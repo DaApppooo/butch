@@ -294,6 +294,12 @@ struct Pack
     start += start_; len = len_;
     return ret;
   }
+  State set_abs(uint32_t start_, uint32_t len_)
+  {
+    const State ret = {start, len, len_};
+    start = start_; len = len_;
+    return ret;
+  }
   int len_diff(State s)
   { return len - s.il; }
   void reset(State s)

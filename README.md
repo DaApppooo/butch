@@ -113,10 +113,11 @@ Contexts are what enables depth awareness with parenthesis, braces, brackets, st
 ```
 > Indentation isn't necessary.
 
-The rules within a context won't be tested unless a tested rules indicates the start of this context. Here's an example:
+The rules within a context won't be tested unless a context rule is declared within a context. Here's an example:
 
 ```
 Name = '\w+'
+! ARGUMENTS # new rule with the 'ARGUMENT' class as an output
 Call = Name ARGUMENTS
 = ARGUMENTS
   Begin = "("
@@ -163,6 +164,8 @@ You can write `+ <OutputClassName>` to copy the rule of another context within t
 In case you want to copy an entire context, you can simply use the context name, or for the global context you can just use `+` and end the line there. Here's a more complex example:
 
 ```
+! BRACKETS
+! PARENTHESIS
 Name = '[a-zA-Z_][a-zA-Z0-9_]*'
 Int = '[-+]?[0-9]+'
 StatementEnd = ";"

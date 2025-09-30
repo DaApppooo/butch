@@ -204,6 +204,40 @@ struct Rule
       = false;
     return self;
   }
+  static Rule init_context(class_id cid, ctx_id ctid)
+  {
+    assert(ctid >= 0);
+    Rule self;
+    self.ruleset_start = cid;
+    self.input_len = 0;
+    self.is_token
+      = self.has_prepeep
+      = self.has_postpeep
+      = self.is_alias
+      = true;
+    self.out = cid;
+    return self;
+  }
+  static Rule init_unknown_context(class_id cid)
+  {
+    Rule self;
+    self.ruleset_start = cid;
+    self.input_len = 1;
+    self.is_token
+      = self.has_prepeep
+      = self.has_postpeep
+      = self.is_alias
+      = true;
+    self.out = 0;
+    return self;
+  }
+
+  constexpr inline bool is_context()
+  { return is_token && has_prepeep && has_postpeep && is_alias; }
+  constexpr inline bool is_unknown_context()
+  { return is_context() && input_len == 1; }
+  constexpr inline void set_context(ctx_id ctid)
+  { input_len = 0; out = ctid; }
 
   Match _sequence_match(
     Parser&,

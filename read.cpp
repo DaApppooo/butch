@@ -227,6 +227,28 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       } while (*s != '\n');
       continue;
     }
+    else if (*s == '!')
+    {
+      s++;
+      SKIP_SPACES_ONLY;
+      do
+      {
+        start = s;
+        while (!isspace(*s))
+          s++;
+        class_name = View<char>(start, s);
+        const class_id cid = self._find_or_make_class(class_name);
+        const ctx_id ctid = self._find_ctx(cid);
+        if (ctid == GLOBAL_CONTEXT)
+          self.rules.push(Rule::init_unknown_context(cid));
+        else
+          self.rules.push(Rule::init_context(cid, ctid));
+        if (cctx >= 0)
+          self.ctxs[cctx].rule_count++;
+        SKIP_SPACES_ONLY;
+      } while (*s != '\n');
+      continue;
+    }
 
     { // class name (and parent class)
       start = s;

@@ -1,10 +1,10 @@
 
-Group = GROUP
+! Parenthesis
 Name = '\w+'
 Func = Name Name Group
 Decl = Name Name
 
-= GROUP
+= Parenthesis
   Begin = "("
   End = ")"
   + Name Decl
