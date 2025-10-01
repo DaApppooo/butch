@@ -230,16 +230,67 @@ void Rule::_apply_context(
   Parser& p,
   Pack<Unit>& units,
   list<Rule::Pt>& u,
-  ctx_id
+  Match m
 ) {
-  
+  assert(is_context());
+  assert(units[0].id == Unit::LITERAL);
+  assert(units.len == 1);
+  const ctx_id ctid = get_context();
+  const Context& ctx = p.ctxs[ctid];
+  Unit* parent = &units[0];
+  bool common_malcom_do_somethin = true;
+  assert(m.matched);
+  const u32 units_s_start = parent->s_start;
+  const u32 units_s_len = parent->s_len;
+  const u16 begin_len = m.u_start;
+  const u16 end_len = m.u_end;
+  if (units_s_start < m.s_start)
+  {
+    units.insert(Unit(
+      Unit::LITERAL,
+      units_s_start,
+      m.s_start - units_s_start - begin_len,
+      0
+    ), 0);
+    units.start++;
+    units.len--;
+  }
+  parent = &units[0];
+  parent->s_start = m.s_start;
+  parent->s_len = m.s_len;
+  parent->id = out;
+  parent->children_len = 1;
+  units.insert(Unit( // <-- the child
+    Unit::LITERAL,
+    m.s_start,
+    m.s_len,
+    0
+  ), 1);
+  units.start++;
+  units.len--;
+  while (common_malcom_do_somethin)
+  {
+    common_malcom_do_somethin = false;
+    for (Rule& r : p.rules.slice(ctx.rules_start, ctx.rule_count))
+    {
+      if (r.out == Rule::BEGIN || r.out == Rule::END)
+        continue;
+      common_malcom_do_somethin =
+        p._check_and_do_rule(r, units, u)
+        || common_malcom_do_somethin;
+    }
+  }
+  units.start--;
+  units[0].children_len = units.len;
+  units.len++;
+  puts("========================================");
+  p.debug_output(stdout, units.ls().to_view());
 }
 
 Match Rule::_match_context(
   Parser& p,
   Pack<Unit>& units,
-  list<Rule::Pt>& u,
-  ctx_id cid
+  list<Rule::Pt>& u
 ) {
   // welcome to cache-misses hell
   //
@@ -248,43 +299,35 @@ Match Rule::_match_context(
 #define LD_BEGIN(IDX) \
   p._comp_str(p.classes[p.in_class(p.rules[ctx.begin[0]], 0)]);
   
-  const Context& ctx = p.ctxs[cid];
+  const Context& ctx = p.ctxs[get_context()];
   Pack<Unit>::State state;
   Match m, sub_m;
   list<u8> depth; // indicies in the ctx.begin and ctx.end
-  list<Rule::Pt> sub_u;
-  u32 units_s_start, ctx_content_len, abs_index;
-  bool did_something;
-  if (units[u[-1].u].id != Unit::LITERAL)
-    return BUTCH_FAIL;
-  if (units[u[-1].u].ctx == cid)
-    return BUTCH_FAIL; // can't return success otherwise butch is stuck in an infinite loop (when no limit is set)
+  u32 ctx_content_len, abs_index;
+  assert(units[0].id == Unit::LITERAL);
   assert(p.rules.atp(ctx.begin[0]).is_token);
-  // assert(p.rules.atn(ctx.begin[0]).input_len == 1);
   assert(p.rules.atp(ctx.end[0]).is_token);
-  // assert(p.rules.atn(ctx.end[0]).input_len == 1);
+  assert(units.len == 1);
   depth.init();
-  sub_u.init();
-  // we temporarily enable _FLAG_START_FIXED_MATCH
-  state = units.set(u.atn(-1).u, 1);
-  m = p.rules[ctx.begin[0]]._sequence_match(p, units, sub_u);
+  m = p.rules[ctx.begin[0]]._sequence_match(p, units, u);
   if (!m.matched)
   {
-    p.flags &= ~p._FLAG_START_FIXED_MATCH;
     units.reset(state);
-    return BUTCH_FAIL;
+    return TOTAL_FAILURE;
   }
-  p.flags |= p._FLAG_START_FIXED_MATCH;
+  // we temporarily enable _FLAG_START_FIXED_MATCH
+  p.flags |= Parser::_FLAG_START_FIXED_MATCH;
   depth.push(0);
-  units_s_start = units[0].s_start;
+  const u32 units_s_start = units[0].s_start;
   const u32 units_s_end = units_s_start + units[0].s_len;
   units[0].s_start = m.s_start;
   units[0].s_start += m.s_len;
+  units[0].s_len -= units_s_end - units[0].s_start - m.s_len;
   while (depth.len() > 0)
   {
     for (u8 i : range(ctx.be_count))
     {
-      sub_m = p.rules[ctx.end[i]]._sequence_match(p, units, sub_u);
+      sub_m = p.rules[ctx.end[i]]._sequence_match(p, units, u);
       if (sub_m.matched)
       {
         if (depth.atn(-1) != i)
@@ -295,17 +338,20 @@ Match Rule::_match_context(
         }
         depth.pop();
         units[0].s_start += sub_m.s_len-1;
+        units[0].s_len -= sub_m.s_len-1;
         break;
       }
-      sub_m = p.rules[ctx.begin[i]]._sequence_match(p, units, sub_u);
+      sub_m = p.rules[ctx.begin[i]]._sequence_match(p, units, u);
       if (sub_m.matched)
       {
         depth.push(i);
         units[0].s_start += sub_m.s_len-1;
+        units[0].s_len -= sub_m.s_len-1;
         break;
       }
     }
     units[0].s_start++;
+    units[0].s_len--;
     if (units[0].s_start >= units_s_end)
     {
       m = BUTCH_FAIL;
@@ -313,77 +359,22 @@ Match Rule::_match_context(
     }
   }
   // successfuly matched
-  ctx_content_len = sub_m.s_start - m.s_end();
-  if (ctx_content_len > 0)
-  {
-    units.insert(Unit( // unit that's englobing everything
-      Unit::LITERAL, m.s_start,
-      sub_m.s_end() - m.s_start,
-      1 // will be updated at the end
-    ), 0);
-    units[0].ctx = cid;
-    units[1].s_start = m.s_end();
-    units[1].s_len = ctx_content_len;
-  }
-  else
-  {
-    units[0].s_start = m.s_start;
-    units[0].s_len = sub_m.s_end() - m.s_start;
-    units[0].ctx = cid;
-  }
-  abs_index = units.start;
-  if (units_s_start < m.s_start)
-  {
-    units.insert(Unit(
-      Unit::LITERAL,
-      units_s_start,
-      m.s_start - units_s_start,
-      0
-    ), 0);
-    units.start++;
-    units.len--;
-    u[-1].u++;
-    abs_index++;
-  }
-  did_something = ctx_content_len > 0;
-  units.reset(state);
-  if (units_s_start != m.s_start)
-    units.start++;
-  state = units.set_abs(u[-1].u+1, 1);
-  p.flags &= ~p._FLAG_START_FIXED_MATCH;
-  while (did_something)
-  {
-    did_something = false;
-    for (Rule& r : p.rules.slice(ctx.rules_start, ctx.rule_count))
-    {
-      if (r.out == Rule::BEGIN || r.out == Rule::END)
-        continue;
-      did_something = p._check_and_do_rule(r, units, sub_u)
-                    || did_something;
-    }
-  }
-  m.u_end = u[-1].u +
-    (units.ls()[abs_index].children_len = 1 + units.len_diff(state));
-  units.reset(state);
   m = Match{
-    .s_start = units_s_start,
-    .s_len = units_s_end - units_s_start,
+    .s_start = m.s_end(),
+    .s_len = sub_m.s_start - m.s_end(),
     .matched = true,
-    .with_offset = true,
-    .u_start = u16(u[-1].u),
-    .u_end = m.u_end
+    .u_start = u16(m.s_len),
+    .u_end = u16(sub_m.s_len)
   };
-  // printf("%i -> %i\n" (i32)m.u_start, (i32)m.u_end);
-  u[-1].r++;
-  _next(u[-1].u, units.ls().to_view());
-  sub_u.destroy();
+  units[0].s_start = units_s_start;
+  units[0].s_len = units_s_end - units_s_start;
+  p.flags &= ~p._FLAG_START_FIXED_MATCH;
   depth.destroy();
   return m;
 FAILURE:
   units[0].s_start = units_s_start;
   units.reset(state);
   p.flags &= ~p._FLAG_START_FIXED_MATCH;
-  sub_u.destroy();
   depth.destroy();
   return m;
 }
@@ -412,7 +403,6 @@ Match Rule::_sequence_match(
     .s_start = units[units.len-1].s_end(),
     .s_len=0,
     .matched=true,
-    .with_offset=false,
     .u_start=0,
     .u_end=(uint16_t)units.len
   };
@@ -507,10 +497,6 @@ Match Rule::_sequence_match(
         if (ret.include(_match_rgx(p, units.to_view(), u, *CPTR(-1))))
           return failure;
         break;
-      case CONTEXT:
-        if (ret.include(_match_context(p, units, u, *CPTR(-1))))
-          return failure;
-        break;
       default:
         if (p.rules[*RPTR(-1)].is_alias)
         { // aliases
@@ -575,10 +561,27 @@ bool Parser::_check_and_do_rule(
   char c = classes[r.out].fix();
   printf("%s\n", classes[r.out].start);
   classes[r.out].mov(c);
+  debug_output(stdout, out.to_view());
 
   assert(!(flags & _FLAG_START_FIXED_MATCH)); // TEMP
 
-  if (r.is_alias)
+  if (r.is_context())
+    for (u32 i : out.range().iter_with(out_iter))
+    {
+      if (out[i].id == Unit::LITERAL)
+      {
+        state = out.set(i, 1);
+        match = r._match_context(*this, out, pt_buffer);
+        if (match.matched)
+        {
+          r._apply_context(*this, out, pt_buffer, match);
+          did_something = true;
+        }
+        out.reset(state);
+        debug_output(stdout, out.to_view());
+      }
+    }
+  else if (r.is_alias)
     return false; // this is an alias
   else if (r.is_token) {
     // token (no peeping can happen here)
@@ -617,7 +620,7 @@ bool Parser::_check_and_do_rule(
                  match.s_start, match.s_len,
                  match.u_end-match.u_start
             ),
-            i+match.u_start+match.with_offset
+            i+match.u_start
           );
           did_something = true;
         }

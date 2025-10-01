@@ -113,9 +113,8 @@ struct Unit
 struct Match
 {
   uint32_t s_start;
-  uint32_t s_len : 30;
+  uint32_t s_len : 31;
   bool matched : 1;
-  bool with_offset : 1;
   // these two fields come with (pre|post)peeping
   uint16_t u_start; // unit view begin (included)
   uint16_t u_end; // unit view end (excluded)
@@ -127,7 +126,6 @@ struct Match
       return true;
     if (m.s_len == 0)
       return false;
-    with_offset = m.with_offset;
     if (s_len == 0)
     {
       s_start = m.s_start;
@@ -178,14 +176,13 @@ struct Rule
   static constexpr rule_id STRING = -10;
   static constexpr rule_id REGEX = -11;
   static constexpr rule_id UNKNOWN_RULE = -12;
-  static constexpr rule_id CONTEXT = -13; // class_id is a ctx_id
 
   static constexpr class_id ALIAS = -2;
   static constexpr class_id BEGIN = -3;
   static constexpr class_id END = -4;
 
-  static constexpr Match PARTIAL_FAILURE = {0, 0, true, false, 0, 0};
-  static constexpr Match TOTAL_FAILURE = {0, 0, false, false, 0, 0};
+  static constexpr Match PARTIAL_FAILURE = {0, 0, true, 0, 0};
+  static constexpr Match TOTAL_FAILURE = {0, 0, false, 0, 0};
   uint32_t ruleset_start;
   uint32_t input_len;
   class_id out;
@@ -208,7 +205,7 @@ struct Rule
   {
     assert(ctid >= 0);
     Rule self;
-    self.ruleset_start = cid;
+    self.ruleset_start = ctid;
     self.input_len = 0;
     self.is_token
       = self.has_prepeep
@@ -221,23 +218,31 @@ struct Rule
   static Rule init_unknown_context(class_id cid)
   {
     Rule self;
-    self.ruleset_start = cid;
+    self.ruleset_start = 0;
     self.input_len = 1;
     self.is_token
       = self.has_prepeep
       = self.has_postpeep
       = self.is_alias
       = true;
-    self.out = 0;
+    self.out = cid;
     return self;
   }
 
-  constexpr inline bool is_context()
+  constexpr inline bool is_context() const
   { return is_token && has_prepeep && has_postpeep && is_alias; }
-  constexpr inline bool is_unknown_context()
+  constexpr inline bool is_unknown_context() const
   { return is_context() && input_len == 1; }
   constexpr inline void set_context(ctx_id ctid)
   { input_len = 0; out = ctid; }
+  constexpr inline ctx_id get_context() const
+  { assert(is_context() && input_len == 0); return ruleset_start; }
+  void _apply_context(
+    Parser&,
+    Pack<Unit>&,
+    list<Rule::Pt>&,
+    Match m
+  );
 
   Match _sequence_match(
     Parser&,
@@ -259,8 +264,7 @@ struct Rule
   Match _match_context(
     Parser& p,
     Pack<Unit>& units,
-    list<Rule::Pt>& u,
-    ctx_id cid
+    list<Rule::Pt>& u
   );
 };
 
@@ -327,6 +331,7 @@ struct Parser
       SINGLE_QUOTE_MISMATCH, // .offset
       CANT_OPEN_FILE,
       UNDECLARED_RULE, // .name
+      UNDECLARED_CONTEXT, // .name
       MISPLACED_PLUS, // .name (name of the rule where the error occured)
       MISPLACED_PREPEEP, // (same as MISPLACED_PLUS)
       DOUBLE_PREPEEP, // (same as MISPLACED_PLUS)

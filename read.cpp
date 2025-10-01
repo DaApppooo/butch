@@ -62,16 +62,7 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
             s++;
           const class_id cid = _find_or_make_class(View(start, s));
           const rule_id rid = _find_rule(cid);
-          if (rid == Rule::UNKNOWN_RULE)
-          {
-            const ctx_id ctid = _find_ctx(cid);
-            if (ctid == GLOBAL_CONTEXT)
-              _push_rc(rid, cid);
-            else
-              _push_rc(Rule::CONTEXT, ctid);
-          }
-          else
-            _push_rc(rid, cid);
+          _push_rc(rid, cid);
           break;
       }
     }
@@ -298,6 +289,17 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       continue;
     if (self.in_rule(r, 0) == Rule::PLUS)
       ERROR_CN(Error::MISPLACED_PLUS, r.out);
+    if (r.is_context())
+    {
+      if (r.is_unknown_context())
+      {
+        const ctx_id ctid = self._find_ctx(r.out);
+        if (ctid == GLOBAL_CONTEXT)
+          ERROR_CN(Error::UNDECLARED_CONTEXT, r.out)
+        r.set_context(ctid);
+      }
+      continue;
+    }
     r.is_token = true;
     for (int j = 0; j < r.input_len; j++)
     {
@@ -312,13 +314,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       {
         const rule_id find_test = self._find_rule(cids[j]);
         if (find_test == Rule::UNKNOWN_RULE)
-        {
-          const ctx_id ctid = self._find_ctx(cids[j]);
-          if (ctid == GLOBAL_CONTEXT)
-            ERROR_CN(Error::UNDECLARED_RULE, cids[j]);
-          rids[j] = Rule::CONTEXT;
-          cids[j] = ctid;
-        }
+        { ERROR_CN(Error::UNDECLARED_RULE, cids[j]) }
         else
           rids[j] = find_test;
       }
@@ -412,6 +408,13 @@ void Parser::debug(FILE* f)
     {
       const Rule& r = rules[k];
       fprintf(f, "  %04i ", k);
+      if (r.is_context())
+      {
+        c = classes[r.out].fix();
+        fprintf(f, "! %s\b", classes[r.out].start);
+        classes[r.out].mov(c);
+        continue;
+      }
       if (r.out == Rule::BEGIN)
         fprintf(f, "Begin =");
       else if (r.out == Rule::END)
@@ -443,11 +446,6 @@ void Parser::debug(FILE* f)
               break;
           }
           fprintf(f, "%s", p);
-        } else if (in_rule(r, i) == Rule::CONTEXT) {
-          const class_id cid = ctxs[in_class(r, i)].name;
-          c = classes[cid].fix();
-          fprintf(f, " %s", classes[cid].start);
-          classes[cid].mov(c);
         } else {
           c = classes[in_class(r, i)].fix();
           fprintf(f, " %s", classes[in_class(r, i)].start);
