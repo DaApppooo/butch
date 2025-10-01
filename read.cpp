@@ -16,6 +16,7 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
 {
   char* start = s;
   const uint32_t init_len = rulesets_rules.len();
+  printf("<> %s\n", _load_str(classes[r.out]));
   while (*s != '\n' && *s != '#')
   {
     if (*s == '"')
@@ -45,16 +46,20 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
         PUSH_SYM('|', Rule::PIPE);
         PUSH_SYM('!', Rule::NOT);
         case '[':
-          if (r.has_postpeep)
+          if (r.is_alias())
+            return Error::ALIAS_SYNTAX_ERROR;
+          if (r.has_postpeep())
             return Error::MISPLACED_PREPEEP;
-          if (r.has_prepeep)
+          if (r.has_prepeep())
             return Error::DOUBLE_PREPEEP;
-          r.has_prepeep = true;
+          r.has_prepeep(true);
           _push_rc(Rule::PREPEEP, 0); s++; break;
         case ']':
-          if (r.has_postpeep)
+          if (r.is_alias())
+            return Error::ALIAS_SYNTAX_ERROR;
+          if (r.has_postpeep())
             return Error::DOUBLE_POSTPEEP;
-          r.has_postpeep = true;
+          r.has_postpeep(true);
           _push_rc(Rule::POSTPEEP, 0); s++; break;
         default:
           start = s;
@@ -131,6 +136,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   View<char> class_name;
   ctx_id cctx = GLOBAL_CONTEXT;
   char* start = s;
+  bool rl_parse = false; // lr by default
 #define CHECK_COMMENTS \
     if (*s == '#') \
     { \
@@ -243,15 +249,36 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
 
     { // class name (and parent class)
       start = s;
-      while (*s != '=' && *s != ':' && !isspace(*s) && *s != '/' && *s != 0)
+      while (isalnum(*s) || *s == '?')
         s++;
       class_name = View<char>(start, s);
     }
     
-    { // handle midway space and '='
-      while (*s == '=' || isspace(*s))
-        s++;
-      start = s;
+    { // handle midway spaces, direction, then '='
+      SKIP_SPACES_ONLY;
+      if (*s == '<')
+      {
+        rl_parse = true;
+        while (*s != '=')
+          s++;
+      }
+      else if (*s == '>' || *s == '=')
+      {
+        rl_parse = false;
+        while (*s != '=')
+          s++;
+      }
+      else
+      {
+        start = _butch_allocpy_view(class_name);
+        self.destroy();
+        return err<Parser>(Error{
+          .type=Error::RULE_SYNTAX_ERROR,
+          .name=start
+        });
+      }
+      s++; // skip the '='
+      SKIP_SPACES_ONLY;
     }
     
     { // class rule
@@ -260,7 +287,13 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       r.ruleset_start = self.rulesets_rules.len();
       r.out = self._find_or_make_class(class_name);
       if (*class_name.start == '?')
-        r.is_alias = true;
+      {
+        if (rl_parse)
+          ERROR_CN(Error::ALIAS_SYNTAX_ERROR, r.out);
+        r.is_alias(true);
+      }
+      else if (rl_parse)
+        r.has_rl_parse(true);
       Error::Type error = self._make_rule(r, s);
       if (error != Error::NONE)
         ERROR_CN(error, r.out);
@@ -282,6 +315,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   rule_id* rids = self.rulesets_rules.data();
   class_id* cids = self.rulesets_classes.data();
   rule_id prev = -1;
+  bool is_token;
   for (uint32_t i = 0; i < self.rules.len(); i++)
   {
     Rule& r = self.rules[i];
@@ -300,11 +334,11 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       }
       continue;
     }
-    r.is_token = true;
+    is_token = !(r.is_alias() || r.is_context() || r.has_rl_parse());
     for (int j = 0; j < r.input_len; j++)
     {
       if (
-        r.is_alias
+        r.is_alias()
         && rids[j] < 0
         && rids[j] != Rule::UNKNOWN_RULE
       ) {
@@ -321,8 +355,9 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       if (j > 0 && rids[j-1] == Rule::NOT && rids[j] < 0)
         ERROR_CN(Error::MISPLACED_NOT, cids[j]);
       if (!self.is_rule(r, j, {Rule::STRING, Rule::REGEX, Rule::PIPE}))
-        r.is_token = false;
+        is_token = false;
     }
+    r.is_token(is_token);
     if (prev < r.ruleset_start)
     {
       rids += r.input_len;
@@ -411,7 +446,7 @@ void Parser::debug(FILE* f)
       if (r.is_context())
       {
         c = classes[r.out].fix();
-        fprintf(f, "! %s\b", classes[r.out].start);
+        fprintf(f, "! %s\n", classes[r.out].start);
         classes[r.out].mov(c);
         continue;
       }
@@ -454,9 +489,9 @@ void Parser::debug(FILE* f)
         if (in_rule(r, i) >= 0)
           fprintf(f, " [%i]", in_rule(r, i));
       }
-      if (r.is_alias)
+      if (r.is_alias())
         fprintf(f, " (alias)");
-      if (r.is_token)
+      if (r.is_token())
         fprintf(f, " (token)");
       fprintf(f, "\n");
     }

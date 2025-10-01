@@ -49,7 +49,7 @@ bool Unit::is(const Parser& p, const View<char> s)
     { r = p.rules.data() + i; rid = i; break; }
   }
   if (!r) return false;
-  if (r->is_alias)
+  if (r->is_alias())
     return _butch_alias_match(p, *r, *this);
   else
     return id == rid;

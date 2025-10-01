@@ -1,14 +1,5 @@
 
-! Parenthesis
-Name = '\w+'
-Func = Name Name Parenthesis
-Decl = Name Name
-
-= Parenthesis
-  Begin = "("
-  End = ")"
-
-  
-
-
+Eq = "="
+Name = '[a-z]'
+Set = Name Eq Name
 

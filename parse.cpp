@@ -10,14 +10,14 @@
 
 bool _butch_alias_match(const Parser& p, const Rule& alias, const Unit& u)
 {
-  assert(alias.is_alias);
+  assert(alias.is_alias());
   const rule_id* test = p.rulesets_rules.data() + alias.ruleset_start;
   const rule_id* const end = test + alias.input_len;
   for (; test < end; test++)
   {
     if (*test == u.id)
       return true;
-    else if (p.rules[*test].is_alias)
+    else if (p.rules[*test].is_alias())
       if (_butch_alias_match(p, p.rules[*test], u))
         return true;
   }
@@ -218,7 +218,7 @@ void _butch_split_token(
   if (post_len > 0 && !p._is_to_be_trimmed(post_start, post_len))
     out.insert(Unit(Unit::LITERAL, post_start, post_len, 0), 2);
   if (pre_len == 0 || p._is_to_be_trimmed(out[0].s_start, pre_len))
-    out.rmv(0);
+    out.rmv(0); // TODO : optimize this rmv out
 }
 
 void _debug(Parser& p, Pack<Unit>& units)
@@ -283,8 +283,6 @@ void Rule::_apply_context(
   units.start--;
   units[0].children_len = units.len;
   units.len++;
-  puts("========================================");
-  p.debug_output(stdout, units.ls().to_view());
 }
 
 Match Rule::_match_context(
@@ -305,8 +303,8 @@ Match Rule::_match_context(
   list<u8> depth; // indicies in the ctx.begin and ctx.end
   u32 ctx_content_len, abs_index;
   assert(units[0].id == Unit::LITERAL);
-  assert(p.rules.atp(ctx.begin[0]).is_token);
-  assert(p.rules.atp(ctx.end[0]).is_token);
+  assert(p.rules.atp(ctx.begin[0]).is_token());
+  assert(p.rules.atp(ctx.end[0]).is_token());
   assert(units.len == 1);
   depth.init();
   m = p.rules[ctx.begin[0]]._sequence_match(p, units, u);
@@ -435,12 +433,12 @@ Match Rule::_sequence_match(
         u[-1].r++;
         break;
       case PREPEEP:
-        expect(!is_token);
+        assert(!is_token());
         ret.u_start = u[-1].u;
         u[-1].r++;
         break;
       case POSTPEEP:
-        expect(!is_token);
+        assert(!is_token());
         ret.u_end = u[-1].u;
         u[-1].r++;
         break;
@@ -498,9 +496,8 @@ Match Rule::_sequence_match(
           return failure;
         break;
       default:
-        if (p.rules[*RPTR(-1)].is_alias)
+        if (p.rules[*RPTR(-1)].is_alias())
         { // aliases
-          
           if (_butch_alias_match(
             p,
             p.rules[*RPTR(-1)],
@@ -513,7 +510,7 @@ Match Rule::_sequence_match(
           else
             FAIL;
         }
-        else if (units[u[-1].u].id != *RPTR(-1))
+        else if (p.rules[units[u[-1].u].id].out != *CPTR(-1))
         {
           FAIL;
         } else {
@@ -555,18 +552,19 @@ bool Parser::_check_and_do_rule(
   bool did_something = false;
   const rule_id rule_idx = &r - rules.data();
   bool test;
-  auto out_iter = [&out](Range<u32>& i){ _next(i, out.to_view()); };
+  auto dyn_out_iter = [&out](DynDirRange<u32>& i){ _next(i, out.to_view()); };
+  auto out_iter = [&out](DirRange<u32>& i){ _next(i, out.to_view()); };
   Pack<Unit>::State state;
 
-  char c = classes[r.out].fix();
-  printf("%s\n", classes[r.out].start);
-  classes[r.out].mov(c);
-  debug_output(stdout, out.to_view());
+  // char c = classes[r.out].fix();
+  // printf("%s\n", classes[r.out].start);
+  // classes[r.out].mov(c);
+  // debug_output(stdout, out.to_view());
 
   assert(!(flags & _FLAG_START_FIXED_MATCH)); // TEMP
 
   if (r.is_context())
-    for (u32 i : out.range().iter_with(out_iter))
+    for (u32 i : out.dyn_range().iter_with(dyn_out_iter))
     {
       if (out[i].id == Unit::LITERAL)
       {
@@ -578,14 +576,14 @@ bool Parser::_check_and_do_rule(
           did_something = true;
         }
         out.reset(state);
-        debug_output(stdout, out.to_view());
       }
     }
-  else if (r.is_alias)
+  else if (r.is_alias())
     return false; // this is an alias
-  else if (r.is_token) {
+  else if (r.is_token())
+  {
     // token (no peeping can happen here)
-    for (u32 i : out.range().iter_with(out_iter))
+    for (u32 i : out.dyn_range().iter_with(dyn_out_iter))
     {
       if (out[i].id == Unit::LITERAL)
       {
@@ -594,7 +592,7 @@ bool Parser::_check_and_do_rule(
         out.reset(state);
         if (match.matched)
         {
-          state = out.set(i, out.len);
+          state = out.set(i, 1);
           _butch_split_token(*this, out, match, rule_idx);
           out.reset(state);
           did_something = true;
@@ -605,11 +603,16 @@ bool Parser::_check_and_do_rule(
   else
   {
     // top-class abstract syntax node type
-    for (u32 i : out.to_view().range().iter_with(out_iter))
-    {
-      for (u32 j : range(i+out[i].children_len+1, out.len+2).iter_with(out_iter))
-      {
+    for (u32& i : out.dyn_range()
+                    .reverse_if(r.has_rl_parse())
+                    .iter_with(out_iter)
+    ) {
+      for (u32& j : range(i+out[i].children_len+1, out.len+1)
+                    .reverse_if(r.has_rl_parse())
+                    .iter_with(out_iter)
+      ) {
         assert(j > i);
+        printf("(%i, %i)\n", i, j);
         state = out.set(i, j-i);
         match = r._sequence_match(*this, out, pt_buffer);
         out.reset(state);
@@ -687,8 +690,8 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
     putc(' ', f);
-    fprintf(f, "(%i) ", ls[i].children_len);
-    if (ls[i].id != Unit::LITERAL && rules[ls[i].id].is_token)
+    // fprintf(f, "(%i) ", ls[i].children_len);
+    if (ls[i].id != Unit::LITERAL && rules[ls[i].id].is_token())
       fprintf(f, "'%s'\n", _load_str(ls[i].str(*this)));
     else
       fprintf(f, "[%i:+%i]\n", ls[i].s_start, ls[i].s_len);

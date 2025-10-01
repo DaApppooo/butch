@@ -52,9 +52,11 @@ struct DirRange
   T _end;
   int dir;
   static constexpr inline Self init(T start, T end, int dir)
-  { return {start, dir, end}; }
+  { return {start, end, dir}; }
+  static constexpr inline Self init(T start, T end)
+  { return {start, end, 1}; }
   static constexpr inline Self init(T end)
-  { return {0, 1, end}; }
+  { return {0, end, 1}; }
   constexpr inline Self& operator ++ () { _i+=dir; return *this; }
   constexpr inline Self begin() { return *this; }
   constexpr inline Self end() { return {_end, _end, dir,}; }
@@ -71,51 +73,53 @@ struct DirRange
     std::function<void(Self&)> f
   ) const
   { return TreeIter<Self, T>{*this, f}; }
+  constexpr inline Self reverse_if(bool x) const
+  { return Self::init(_end, _i, x ? -dir : dir); }
 };
 
-template <class T = uint32_t>
-struct Range
+template <class T = int32_t>
+struct DynDirRange
 {
-  using Self = Range<T>;
+  using Self = DynDirRange<T>;
   T _i;
-  T _end;
-  static constexpr inline Range<T> init(T start, T end)
-  { return {start, end}; }
-  static constexpr inline Range<T> init(T end)
-  { return {0, end}; }
-  constexpr inline Self& operator ++ () { _i++; return *this; }
+  const T& _end;
+  int dir;
+  static constexpr inline Self init(T start, const T& end, int dir)
+  { return {start, end, dir}; }
+  static constexpr inline Self init(T start, const T& end)
+  { return {start, end, 1}; }
+  static constexpr inline Self init(const T& end)
+  { return {0, end, 1}; }
+  constexpr inline Self& operator ++ () { _i+=dir; return *this; }
   constexpr inline Self begin() { return *this; }
-  constexpr inline Self end() { return {_end, _end}; }
+  constexpr inline Self end() { return {_end, _end, dir,}; }
   constexpr inline T& operator * () { return _i; }
-  constexpr inline bool operator == (Range<T> other)
+  constexpr inline bool operator == (Self other)
   { return _i == other._i; }
-  constexpr inline bool operator != (Range<T> other)
-  { return _i < other._i; }
-  constexpr inline bool operator < (Range<T> other)
-  { return _i < other._i; }
+  constexpr inline bool operator != (Self other)
+  { return _i*dir < other._i*dir; }
+  constexpr inline bool operator < (Self other)
+  { return _i*dir < other._i*dir; }
   constexpr inline operator T& () const { return _i; }
   constexpr inline operator T& () { return _i; }
-  constexpr inline DirRange<T> reverse_if(bool cond)
-  {
-    if (!cond)
-      return DirRange<T>::init(_i, _end, 1);
-    return DirRange<T>::init(_end, _i, -1);
-  }
-  constexpr inline TreeIter<Range<T>, T> iter_with(
-    std::function<void(Range<T>&)> f
+  constexpr inline TreeIter<Self, T> iter_with(
+    std::function<void(Self&)> f
   ) const
-  { return TreeIter<Range<T>, T>{*this, f}; }
+  { return TreeIter<Self, T>{*this, f}; }
+  constexpr inline DirRange<T> reverse_if(bool x) const
+  { return DirRange<T>::init(_end, _i, x ? -dir : dir); }
 };
 
+
 template <class T>
-constexpr inline Range<T> range(T start, T end)
-{ return Range<T>::init(start, end); }
+constexpr inline DirRange<T> range(T start, T end)
+{ return DirRange<T>::init(start, end); }
 template <class T>
 constexpr inline DirRange<T> range(T start, T end, int step)
 { return DirRange<T>::init(start, end, step); }
 template <class T>
-constexpr inline Range<T> range(T end)
-{ return Range<T>::init(end); }
+constexpr inline DirRange<T> range(T end)
+{ return DirRange<T>::init(end); }
 
 template <class T>
 struct View
@@ -148,8 +152,8 @@ struct View
   { return start < other.start; }
   constexpr inline TreeIter<View<T>, T> iter_with(void(*f)(View<T>&)) const
   { return TreeIter{*this, f}; }
-  constexpr inline Range<decltype(len)> range() const
-  { return Range<decltype(len)>{0, len}; }
+  constexpr inline DirRange<decltype(len)> range() const
+  { return DirRange<decltype(len)>::init(len); }
 };
 template <>
 struct View<char>
@@ -290,26 +294,26 @@ struct Pack
   { return _data.slice(start, len); }
   State set(uint32_t start_, uint32_t len_)
   {
-    const State ret = {start, len, len_};
+    const State ret = {start, len, _data.len()};
     start += start_; len = len_;
     return ret;
   }
   State set_abs(uint32_t start_, uint32_t len_)
   {
-    const State ret = {start, len, len_};
+    const State ret = {start, len, _data.len()};
     start = start_; len = len_;
     return ret;
   }
   int len_diff(State s)
   { return len - s.il; }
   void reset(State s)
-  { start = s.s; len = s.l+(len-s.il); }
+  { start = s.s; len = s.l+(_data.len()-s.il); }
   Self& rmv(int i)
   { _data.rmv(start+i); len--; return *this; }
   list<T>& ls() const { return _data; }
   list<T>& ls() { return _data; }
-  constexpr inline Range<decltype(len)> range() const
-  { return Range<decltype(len)>{0, len}; }
+  constexpr inline DynDirRange<decltype(len)> dyn_range() const
+  { return DynDirRange<decltype(len)>::init(len); }
 };
 
 #define GEN template <class T>

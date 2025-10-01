@@ -186,19 +186,15 @@ struct Rule
   uint32_t ruleset_start;
   uint32_t input_len;
   class_id out;
-  bool is_token : 1;
-  bool is_alias : 1;
-  bool has_prepeep : 1;
-  bool has_postpeep : 1;
+  // bool is_token : 1;
+  // bool is_alias : 1;
+  // bool has_prepeep : 1;
+  // bool has_postpeep : 1;
+  uint32_t _flags;
   static Rule init()
   {
     Rule self;
-    self.ruleset_start = 
-    self.is_token
-      = self.has_prepeep
-      = self.has_postpeep
-      = self.is_alias
-      = false;
+    self._flags = 0;
     return self;
   }
   static Rule init_context(class_id cid, ctx_id ctid)
@@ -207,11 +203,7 @@ struct Rule
     Rule self;
     self.ruleset_start = ctid;
     self.input_len = 0;
-    self.is_token
-      = self.has_prepeep
-      = self.has_postpeep
-      = self.is_alias
-      = true;
+    self.is_context(true);
     self.out = cid;
     return self;
   }
@@ -220,21 +212,47 @@ struct Rule
     Rule self;
     self.ruleset_start = 0;
     self.input_len = 1;
-    self.is_token
-      = self.has_prepeep
-      = self.has_postpeep
-      = self.is_alias
-      = true;
+    self.is_context(true); 
     self.out = cid;
     return self;
   }
 
+  static constexpr uint32_t _TOKEN    = 0b0001;
+  static constexpr uint32_t _PREPEEP  = 0b0010;
+  static constexpr uint32_t _POSTPEEP = 0b0100;
+  static constexpr uint32_t _TWOPEEP  = 0b0110;
+  static constexpr uint32_t _RL_PARSE = 0b1000;
+
+  static constexpr uint32_t _CONTEXT  = 0b0101;
+  static constexpr uint32_t _ALIAS    = 0b0011;
+  constexpr inline bool is_token() const
+  { return _flags == _TOKEN; }
+  constexpr inline bool is_token(bool x)
+  { if (x) _flags = _TOKEN; return is_token(); }
+  constexpr inline bool has_prepeep() const
+  { return _flags & _PREPEEP && !(_flags & _TOKEN); }
+  constexpr inline bool has_prepeep(bool x)
+  { if (x) _flags |= PREPEEP; return has_prepeep(); }
+  constexpr inline bool has_postpeep() const
+  { return _flags & _POSTPEEP && !(_flags & _TOKEN); }
+  constexpr inline bool has_postpeep(bool x)
+  { if (x) _flags |= POSTPEEP; return has_postpeep(); }
+  constexpr inline bool has_rl_parse() const
+  { return _flags & _RL_PARSE && !(_flags & _TOKEN); }
+  constexpr inline bool has_rl_parse(bool x)
+  { if (x) _flags |= _RL_PARSE; return has_rl_parse(); }
+  constexpr inline bool is_alias() const
+  { return _flags == _ALIAS; }
+  constexpr inline bool is_alias(bool x)
+  { if (x) _flags = _ALIAS; return is_alias(); }
   constexpr inline bool is_context() const
-  { return is_token && has_prepeep && has_postpeep && is_alias; }
+  { return _flags == _CONTEXT; }
+  constexpr inline bool is_context(bool x)
+  { if (x) _flags = _CONTEXT; return is_context(); }
   constexpr inline bool is_unknown_context() const
   { return is_context() && input_len == 1; }
   constexpr inline void set_context(ctx_id ctid)
-  { input_len = 0; out = ctid; }
+  { assert(is_context()); input_len = 0; out = ctid; }
   constexpr inline ctx_id get_context() const
   { assert(is_context() && input_len == 0); return ruleset_start; }
   void _apply_context(
@@ -338,6 +356,7 @@ struct Parser
       DOUBLE_POSTPEEP, // (same as MISPLACED_PLUS)
       MISPLACED_NOT, // (same as MISPLACED_PLUS)
       ALIAS_SYNTAX_ERROR, // .name (same as MISPLACED_PLUS)
+      RULE_SYNTAX_ERROR,
       CONTEXT_MISSING_BEGIN,
       CONTEXT_MISSING_END,
       CONTEXT_TOO_MANY_INHERITS
