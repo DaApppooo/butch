@@ -543,6 +543,16 @@ bool Parser::_is_to_be_trimmed(uint32_t begin, uint32_t len)
   return true;
 }
 
+u32 _butch_prev(const Pack<Unit>& units, u32 i)
+{
+  for (u32 j = 0; j < i; _next(j, units.to_view()))
+  {
+    if (j + units[j].children_len + 1 >= i)
+      return j;
+  }
+  return i;
+}
+
 bool Parser::_check_and_do_rule(
   Rule& r,
   Pack<Unit>& out,
@@ -553,7 +563,7 @@ bool Parser::_check_and_do_rule(
   const rule_id rule_idx = &r - rules.data();
   bool test;
   auto dyn_out_iter = [&out](DynDirRange<u32>& i){ _next(i, out.to_view()); };
-  auto out_iter = [&out](DirRange<u32>& i){ _next(i, out.to_view()); };
+  auto dyn_out_rev_iter = [&out](DynDirRange<u32>& i){ _butch_prev(out, i); };
   Pack<Unit>::State state;
 
   // char c = classes[r.out].fix();
@@ -600,19 +610,17 @@ bool Parser::_check_and_do_rule(
       }
     }
   }
-  else
+  else if (r.has_rl_parse())
   {
-    // top-class abstract syntax node type
-    for (u32& i : out.dyn_range()
-                    .reverse_if(r.has_rl_parse())
-                    .iter_with(out_iter)
-    ) {
-      for (u32& j : range(i+out[i].children_len+1, out.len+1)
-                    .reverse_if(r.has_rl_parse())
-                    .iter_with(out_iter)
-      ) {
-        assert(j > i);
+    for (u32 i = _butch_prev(out, out.len); i >= 0; i=_butch_prev(out,i))
+    {
+      u32 j = i;
+      _next(j, out.to_view().shorten(i, 0));
+      for (; j <= out.len; _next(j,out.to_view()))
+      {
         printf("(%i, %i)\n", i, j);
+        debug_output(stdout, out.to_view());
+        assert(j > i);
         state = out.set(i, j-i);
         match = r._sequence_match(*this, out, pt_buffer);
         out.reset(state);
@@ -626,6 +634,37 @@ bool Parser::_check_and_do_rule(
             i+match.u_start
           );
           did_something = true;
+          j++;
+        }
+        _next(j, out.to_view());
+      }
+    }
+  }
+  else
+  {
+    // top-class abstract syntax node type
+    for (u32& i : out.dyn_range()
+                    .iter_with(dyn_out_iter)
+    ) {
+      u32 j_end = out.len+1;
+      for (u32& j : dyn_range(i+out[i].children_len+1, j_end)
+                    .iter_with(dyn_out_iter)
+      ) {
+        assert(j > i);
+        state = out.set(i, j-i);
+        match = r._sequence_match(*this, out, pt_buffer);
+        out.reset(state);
+        if (match.matched)
+        {
+          out.insert(
+            Unit(rule_idx,
+                 match.s_start, match.s_len,
+                 match.u_end-match.u_start
+            ),
+            i+match.u_start
+          );
+          did_something = true;
+          j_end++;
         }
         _next(j, out.to_view());
       }

@@ -1,5 +1,6 @@
 
 Eq = "="
 Name = '[a-z]'
-Set = Name Eq Name
+?Atom = Name Set
+Set <= ?Atom Eq ?Atom
 

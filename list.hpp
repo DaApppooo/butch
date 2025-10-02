@@ -115,6 +115,9 @@ template <class T>
 constexpr inline DirRange<T> range(T start, T end)
 { return DirRange<T>::init(start, end); }
 template <class T>
+constexpr inline DynDirRange<T> dyn_range(T start, T& end)
+{ return DynDirRange<T>::init(start, end); }
+template <class T>
 constexpr inline DirRange<T> range(T start, T end, int step)
 { return DirRange<T>::init(start, end, step); }
 template <class T>
@@ -284,6 +287,8 @@ struct Pack
   uint32_t len;
   void init() { _data.init(); start = len = 0; }
   T* data() {  _data.data() + start; }
+  T& operator [] (uint32_t index) const
+  { return _data.atp(start+index); }
   T& operator [] (uint32_t index)
   { return _data.atp(start+index); }
   Self& insert(T element, uint32_t index)

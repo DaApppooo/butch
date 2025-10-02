@@ -312,9 +312,6 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   }
 
   // resolve rules with Rule.in_rule(x) == UNKNOWN_RULE
-  rule_id* rids = self.rulesets_rules.data();
-  class_id* cids = self.rulesets_classes.data();
-  rule_id prev = -1;
   bool is_token;
   for (uint32_t i = 0; i < self.rules.len(); i++)
   {
@@ -335,6 +332,8 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       continue;
     }
     is_token = !(r.is_alias() || r.is_context() || r.has_rl_parse());
+    rule_id* rids = self.rulesets_rules.data()+r.ruleset_start;
+    rule_id* cids = self.rulesets_classes.data()+r.ruleset_start;
     for (int j = 0; j < r.input_len; j++)
     {
       if (
@@ -358,12 +357,6 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
         is_token = false;
     }
     r.is_token(is_token);
-    if (prev < r.ruleset_start)
-    {
-      rids += r.input_len;
-      cids += r.input_len;
-    }
-    prev = r.ruleset_start;
   }
 
   // Resolve contexts
