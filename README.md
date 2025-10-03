@@ -65,9 +65,9 @@ Here is a table of all of the current butch symbols and what they mean:
 ### Rules
 Rules look like this:
 ```
-  OutputClass = <ruleset>
+  OutputClass = ruleset
 ```
-With `<ruleset>` being "word boundary" separated classes, strings, regexes symbols or aliases. Spaces aren't necessary around the colon character.
+With `ruleset` being "word boundary" separated classes, strings, regexes symbols or aliases. Spaces aren't necessary around the colon character.
 
 Examples:
 ```
@@ -78,11 +78,14 @@ List = Name ((Colon Name)+ |)
 
 > Classes in a ruleset don't need to first be declared as the output of a rule. A name resolution pass is done after the butch code is read.
 
-You can copy a ruleset of another rule using this syntax (this is useless on its own):
+Rules (non token-like) are, by default, checked from left to right, but can be checked right to left with this syntax:
 ```
-Name = '\w+'
-NameThe2nd : Name
+RightToLeft < = A B C
+LeftToRightByDefault = D E F
+LeftToRightSpecified > = G H I
 ```
+
+> The space, again, is not necessary.
 
 ### Aliases
 
@@ -124,7 +127,7 @@ Call = Name ARGUMENTS
   End = ")"
 ```
 
-The goal once a context is reached in a ruleset is to first define the start and the end of this context, then the other specified rules are ran over and over again, until none match (or all the rules are tried `Parser.rule_test_max` times if the value is greater than 0), in order of specification. Thus, only the `Begin` and `End` rules are tested out of order.
+A context match kind of rule works by first looking for the start and the end of this context, and then the other specified rules are ran over and over again, until none match (or all the rules are tried `Parser.rule_test_max` times if the value is greater than 0), in order of specification. Thus, only the `Begin` and `End` rules are tested out of order (and they do not produce any unit).
 
 Contexts require that the unit that should match ARGUMENTS is a literal. The literal is first analyzed character by character, while trying to find groups of `Begin` and `End`. If an `End` is found with no matching `Begin` (this can happen with mixed contexts, see further down below), the task of matching the context fails, and the unit is tagged with `Unit::ERROR_CONTEXT_MISMATCH` as its id, instead of `Unit::LITERAL`. Also, the `Begin` and `End` rules have the special property that they only match at the begining of the literal. That is, with regexes, it's equivalent as adding a `^` at the begining of your pattern.
 
@@ -161,7 +164,7 @@ You can write `+ <OutputClassName>` to copy the rule of another context within t
 
 > Note that contexts aren't scopes for rules. Rules present within a context can be freely accessed from any other contexts.
 
-In case you want to copy an entire context, you can simply use the context name, or for the global context you can just use `+` and end the line there. Here's a more complex example:
+In case you want to copy an entire context, you can simply use the context name, or for the global context you can just use `+` and end the line there. To be able to handle this behavior, when using the `+`, contexts are checked first and rules second. Which means that you cannot copy a context push. Here's a more complex example:
 
 ```
 ! BRACKETS
@@ -175,7 +178,7 @@ Indexing = Name BRACKETS
 ?Atom = Name Indexing Int
 ?Variable = ?Type # for some weird reason here it happens to be the same
 VarDecl = ?Type Name
-Assignement = ?Variable Eq ?Atom
+Assignement <= ?Variable Eq ?Atom
 Statement = VarDecl StatementEnd
 = PARENTHESIS : BRACKETS
   Begin = "("
@@ -189,3 +192,15 @@ Statement = VarDecl StatementEnd
 ```
 
 > Specifying both `Name` and `VarDecl` in the `PARENTHESIS` context is useless, because dependencies are resolved, so only specifying `VarDecl` would also copy `Name` (and it has the side effect of also copying `Indexing`). 
+
+## A few notes on this implementation
+
+1. There are no checks to avoid doubles of rules, contexts, etc...
+    - Copies of a rules in the same context will simply repeat the operation.
+    - Copies of contexts have no effects (and simply uses more memory).
+    - Copies of output class but with different rulesets in two rules allow different ways to produce a unit with the same class.
+2. Whether a name references a context or a rule depends on where the name is:
+    - As the output class of a rule: it references the rule itself.
+    - In a ruleset: if it exists, the context push with this name in the current context, and if not a rule whose output class has this name.
+    - In a copy (with the `+` operator at the start of a line: )
+

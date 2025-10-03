@@ -543,14 +543,14 @@ bool Parser::_is_to_be_trimmed(uint32_t begin, uint32_t len)
   return true;
 }
 
-u32 _butch_prev(const Pack<Unit>& units, u32 i)
+i32 _butch_prev(const Pack<Unit>& units, i32 i)
 {
   for (u32 j = 0; j < i; _next(j, units.to_view()))
   {
     if (j + units[j].children_len + 1 >= i)
       return j;
   }
-  return i;
+  return -1;
 }
 
 bool Parser::_check_and_do_rule(
@@ -567,7 +567,7 @@ bool Parser::_check_and_do_rule(
   Pack<Unit>::State state;
 
   // char c = classes[r.out].fix();
-  // printf("%s\n", classes[r.out].start);
+  // printf(">>>> %s <<<<\n", classes[r.out].start);
   // classes[r.out].mov(c);
   // debug_output(stdout, out.to_view());
 
@@ -593,7 +593,7 @@ bool Parser::_check_and_do_rule(
   else if (r.is_token())
   {
     // token (no peeping can happen here)
-    for (u32 i : out.dyn_range().iter_with(dyn_out_iter))
+    for (u32 i = 0; i < out.len; _next(i, out.to_view()))
     {
       if (out[i].id == Unit::LITERAL)
       {
@@ -612,14 +612,12 @@ bool Parser::_check_and_do_rule(
   }
   else if (r.has_rl_parse())
   {
-    for (u32 i = _butch_prev(out, out.len); i >= 0; i=_butch_prev(out,i))
+    for (i32 i = _butch_prev(out, out.len); i >= 0; i=_butch_prev(out,i))
     {
       u32 j = i;
-      _next(j, out.to_view().shorten(i, 0));
+      _next(j, out.to_view());
       for (; j <= out.len; _next(j,out.to_view()))
       {
-        printf("(%i, %i)\n", i, j);
-        debug_output(stdout, out.to_view());
         assert(j > i);
         state = out.set(i, j-i);
         match = r._sequence_match(*this, out, pt_buffer);
@@ -643,13 +641,11 @@ bool Parser::_check_and_do_rule(
   else
   {
     // top-class abstract syntax node type
-    for (u32& i : out.dyn_range()
-                    .iter_with(dyn_out_iter)
-    ) {
-      u32 j_end = out.len+1;
-      for (u32& j : dyn_range(i+out[i].children_len+1, j_end)
-                    .iter_with(dyn_out_iter)
-      ) {
+    for (u32 i = 0; i < out.len; _next(i, out.to_view()))
+    {
+      u32 j = i;
+      _next(j, out.to_view());
+      for (; j < out.len+1; _next(j, out.to_view())) {
         assert(j > i);
         state = out.set(i, j-i);
         match = r._sequence_match(*this, out, pt_buffer);
@@ -664,7 +660,7 @@ bool Parser::_check_and_do_rule(
             i+match.u_start
           );
           did_something = true;
-          j_end++;
+          j++;
         }
         _next(j, out.to_view());
       }
