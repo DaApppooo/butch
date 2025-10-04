@@ -246,6 +246,7 @@ void Rule::_apply_context(
   const u16 end_len = m.u_end;
   if (units_s_start < m.s_start)
   {
+    assert(m.s_start - units_s_start - begin_len > 0);
     units.insert(Unit(
       Unit::LITERAL,
       units_s_start,
@@ -260,6 +261,7 @@ void Rule::_apply_context(
   parent->s_len = m.s_len;
   parent->id = out;
   parent->children_len = 1;
+  assert(m.s_len < 32);
   units.insert(Unit( // <-- the child
     Unit::LITERAL,
     m.s_start,
@@ -283,6 +285,18 @@ void Rule::_apply_context(
   units.start--;
   units[0].children_len = units.len;
   units.len++;
+  const i32 total_end = units_s_start+units_s_len;
+  const i32 ctx_end = m.s_start+m.s_len+m.u_end;
+  const i32 tail_len = total_end - ctx_end;
+  if (tail_len > 0 && !p._is_to_be_trimmed(ctx_end, tail_len))
+  {
+    units.insert(Unit(
+      Unit::LITERAL,
+      ctx_end,
+      tail_len,
+      0
+    ), units.len);
+  }
 }
 
 Match Rule::_match_context(
@@ -325,6 +339,7 @@ Match Rule::_match_context(
   {
     for (u8 i : range(ctx.be_count))
     {
+      assert(units[0].s_len > 0);
       sub_m = p.rules[ctx.end[i]]._sequence_match(p, units, u);
       if (sub_m.matched)
       {
@@ -364,6 +379,7 @@ Match Rule::_match_context(
     .u_start = u16(m.s_len),
     .u_end = u16(sub_m.s_len)
   };
+  assert(m.s_len < 32);
   units[0].s_start = units_s_start;
   units[0].s_len = units_s_end - units_s_start;
   p.flags &= ~p._FLAG_START_FIXED_MATCH;
@@ -371,6 +387,8 @@ Match Rule::_match_context(
   return m;
 FAILURE:
   units[0].s_start = units_s_start;
+  units[0].s_len = units_s_end - units_s_start;
+  assert(units[0].s_len < 32);
   units.reset(state);
   p.flags &= ~p._FLAG_START_FIXED_MATCH;
   depth.destroy();
@@ -665,6 +683,10 @@ bool Parser::_check_and_do_rule(
         _next(j, out.to_view());
       }
     }
+  }
+  for (int i = 0; i < out.len; i++)
+  {
+    assert(out[i].s_len < 32);
   }
   return did_something;
 }

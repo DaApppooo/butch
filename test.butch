@@ -1,6 +1,16 @@
 
-Eq = "="
+! Parenthesis
 Name = '[a-z]'
-?Atom = Name Set
-Set >= ?Atom Eq ?Atom
+
+= Parenthesis
+  Begin = "("
+  End = ")"
+  ! Parenthesis
+  ! Brackets
+  + Name
+
+= Brackets
+  Begin = "[["
+  End = "]]"
+  + Name
 

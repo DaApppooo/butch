@@ -252,7 +252,7 @@ struct Rule
   constexpr inline bool is_unknown_context() const
   { return is_context() && input_len == 1; }
   constexpr inline void set_context(ctx_id ctid)
-  { assert(is_context()); input_len = 0; out = ctid; }
+  { assert(is_context()); input_len = 0; ruleset_start = ctid; }
   constexpr inline ctx_id get_context() const
   { assert(is_context() && input_len == 0); return ruleset_start; }
   void _apply_context(

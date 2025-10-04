@@ -5,17 +5,23 @@
 
 ## Concepts
 
+### Lexic
+
 Butch doesn't really work with tokens and abstract syntax tree nodes (AST), but instead works with <u>units</u>. Units are both tokens (when they have no children\*) and AST nodes. A token kind of unit can be sub-parsed and become a AST node for example.
 
-<u>Rules</u> are match functions that take any kind of input, and try to match it against their ruleset, and spit out a unit the specified output class. Rules can contain classes, strings, regexes, aliases and symbols.
+<u>Rules</u> are functions that take a list of units as input, try to match them against their ruleset, and if there's a match, spits out a unit with the specified output class . Custom side effects can be added in case there's a match. Rules can contain classes, strings, regexes, aliases and symbols.
 
 <u>Classes</u> are the identifier for what a unit represents. You can see units as instances of classes.
 
 <u>Symbols</u> are characters like `(` and `!` that lets you do non-deterministic parsing of your units.
 
-<u>`Literal`</u> is the default class that represents unparsed code (it cannot be accessed within a piece of butch code).
+<u>Literal</u> is the default class that represents unparsed code (it cannot be accessed within butch code).
 
-Butch simply creates a big unit that contains the whole code, and then tries to apply every rules it can until none match (a limited amount of attempts can be specified [TODO]). Some rules will split the big string into `["what's before", TheOutputClass, "what's after"]` (tokenizer-like behavior). Other rules will group classes and literals together (parser-like behavior). Butch choses which rules do what, and you only have to specify transformations ("if the input looks like that, then we output this").
+<u>Contexts</u> are groups of rules that are only checked if the context is "pushed" (either by context push declaration or with a rule side effect). They're the one of the reasons Butch isn't a context-free parser (which is why they're named "contexts"). Typically, matching groups of braces together is done with contexts.
+
+### How it works
+
+Butch simply creates a big unit that contains the whole code, and then tries to apply every rules declared in the global context until none match (a limited amount of attempts can be specified [TODO]). Some rules will split the big string into `["what's before", TheOutputClass, "what's after"]` (these rules are called "token-like" rules). Other rules will group classes and literals together (parser-like behavior). Butch choses which rules do what, and you only have to specify transformations ("if the input looks like that, then we output this").
 
 ## Syntax
 
@@ -61,6 +67,8 @@ Here is a table of all of the current butch symbols and what they mean:
 | `+` | Match at least once the previous class, string, regex, alias or grouping. |
 | `[` | "Prepreep": everything that's before won't be included as children of the output unit. |
 | `]` | "Postpeep": everything that's after won't be included as children of the output unit. |
+| `{` | Side effects declaration begin (cannot be recursed) |
+| `}` | Side effects declaration end |
 
 ### Rules
 Rules look like this:
@@ -192,6 +200,110 @@ Statement = VarDecl StatementEnd
 ```
 
 > Specifying both `Name` and `VarDecl` in the `PARENTHESIS` context is useless, because dependencies are resolved, so only specifying `VarDecl` would also copy `Name` (and it has the side effect of also copying `Indexing`). 
+
+### Side effects [TODO]
+
+When declaring a rule, you might want to add some side effects to the output if the rule successfuly matched. This can be achieved with curly braces put on the right of the ruleset element you want to add side effects to. For example, if you want to remove a unit once the rule is matched, you can use the `del` keyword:
+```
+StatementEnd = ";"
+Int = '[0-9]+'
+Statement = Int StatementEnd{del}
+```
+
+Side effects provide a very basic way to add, check, verify contextual information, and optimize the output of the parser. Here is the list of keywords and syntaxes you can use, separating each by a comma:
+
+- `del` : Removes the unit, incompatible with every other non-conditional keyword. 
+- `ctx <context>` : Transforms the corresponding unit into a literal and checks every rule from `<context>`. Incompatible with every other non-conditional keyword.
+- `to <new_name>` : Gives a new name to the unit (creates the class accordingly if needed).
+- *`check <expression>` : Additional check. Must be put before every other side effect. If `<expression>` is 0, the match success will be canceled.
+- *`if <expression>` : Sets the `cmp` flag to 1 if `<expression>` is non-zero. Sets it to 0 otherwise. By default the `cmp` flag is set to 1.
+- *`then <side effect>` : Check the `cmp` flag, and if enabled, executes `<side effect>`.
+- *`else <side effect>` : Check the `cmp` flag, and if disabled, executes `<side effect>`.
+- *`call <symbol>` : Tries to find symbol `<symbol>`. On failure, will end parsing (unless `FLAG_IGNORE_MISSING_SYMBOLS` is on in the parser flags, in which case side effects will be ignored). On success, will call the symbol with a reference/pointer to the current parser, rule, and unit as arguments (in this order), expecting a boolean return value. The return value indicate failure of operation (false on success, true otherwise). If the return value happens to be true, the unit will have a valid `symbol` attribute set to the address of the found symbol, and its id will be set to `Unit::CALL_FAILURE`.
+- *`try <symbol>` : Same as call, except that the `cmp` flag is set to the boolean inverse of the return value, and the id of the unit isn't set to `Unit::CALL_FAILURE` (although failure to find the symbol will result in end of parsing, or side effects skipping).
+- **`istore <expression>` : Evaluates `<expression>` as a signed 64bit integer, and stores it into the `data` attribute of the unit.
+- **`ustore <expression>` : Evaluates `<expression>` as an unsigned integer, and stores it into the `data` attribute of the unit.
+- **`pstore <expression>` : Evaluates `<expression>` as an owned pointer (assumed to be allocated with `malloc/calloc/realloc`), and stores it into the `data` attribute of the unit (when the unit is destroyed, the pointer is freed with C's `free`).
+- **`rstore <expression>` : Evaluates `<expression>` as a referenced pointer, and stores it into the `data` attribute of the unit (when the unit is destroyed, the pointer isn't freed).
+
+> Side effects annoted with * might never be implemented, and ** have an even higher chance of never being implemented. Both will be removed from the documentation in such case.
+
+## The interface
+
+The files `readparse.cpp`, `readserialize.cpp`, and `deserializeparse.cpp` provide examples on how to use the butch library. But here's a quick explanation. Also, as a general note, there's no use of C++'s constructor and destructors, nor private members. You can do whatever you want with this code, and you have to manage the memory yourself. Everything that needs to be destroyed has a `destroy` method. This includes `Parser`, `list<T>` (which is different from `std::list<T>`). Everything is "moved" (instead of copied) by default, contrary to C++ standards (why on earth would you want an implicit copy of a list ???). Also, all allocations are done using `malloc/realloc` (and freeing is done with `free`).
+
+### Reading butch code
+
+The first step is to read a piece of butch code. To do so, you can either provide a string with the butch code, or the path to a file, to a custom constructor for the `Parser` class:
+
+```cpp
+#include "butch.hpp"
+...
+Result<Parser, Parser::Error> res = Parser::read(owned_ptr_to_the_code);
+Result<Parser, Parser::Error> res = Parser::read_file(ref_ptr_to_path);
+```
+
+You can then check if the reading of your butch code failed using a simple if and switch statement:
+
+```cpp
+if (res.type == ERR)
+{
+  switch (res.err.type)
+  {
+    case DOUBLE_QUOTE_MISMATCH:
+      puts("Double quote mismatch");
+      break
+    ...
+  }
+  // no need to destroy the parser here
+}
+else
+{
+  // the code seems legit !
+  Parser& my_parser = res.ok;
+  ...
+}
+```
+
+> See `readparse.cpp` to see all possible errors that can occur (some are declared in the code but are for internal use only).
+
+And that's it ! You could, for example, print the state of the parser, using the debug method:
+
+```cpp
+my_parser.debug(stdout);
+```
+
+And don't forget, if you're finished with your parser, to destroy it !
+
+```cpp
+my_parser.destroy();
+```
+
+### Serialization/Deserialization [TODO]
+
+It can be useful to serialize your butch code in order to avoid the whole butch code parsing step, which can make you gain a bit of time, especially on big pieces of butch code. To serialize and deserialize your parser, you're offered 3 methods per task:
+
+```cpp
+// For serialization
+size_t my_parser.serialize_file(FILE*)
+size_t my_parser.serialize(void*& ptr)
+size_t my_parser.serialize(
+  size_t(*callback)(char* src, size_t len, void* _data),
+  void* data
+)
+// And for deserialization
+Result<Parser, Parser::Error> Parser::deserialize_file(FILE*)
+Result<Parser, Parser::Error> Parser::deserialize(void*& ptr, size_t len)
+Result<Parser, Parser::Error> Parser::deserialize(
+  size_t(*callback)(void* dst, size_t len, void* _data),
+  void* data
+)
+```
+The callbacks can return a value different than the asked length (the `len` argument) to signal any error in the reading/writing process. Any error in the serialization process will return 0 as the serialized size. And the only error that can be returned by `Paser::deserialize` is `Parser::Error::DESERIALIZATION_ERROR`. 
+
+### Parsing
+
+Finally, to actually use your parser, 
 
 ## A few notes on this implementation
 

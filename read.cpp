@@ -175,7 +175,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
         if (ctx.be_count >= 4)
           ERROR_CN(Error::CONTEXT_TOO_MANY_INHERITS, ctx.name);
         start = s;
-        while (isalnum(*(s++)));
+        while (isalnum(*s)) s++;
         const class_id cid
           = self._find_or_make_class(View<char>(start, s));
         const ctx_id ctxid = self._find_ctx(cid);

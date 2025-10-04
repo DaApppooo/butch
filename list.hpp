@@ -527,7 +527,7 @@ GEN inline Self& list<T>::insert(T element, int index)
   {
     index = len() + index;
   }
-  if (len() < 1)
+  if (len() < 1 || index == len())
   {
     self.push(element);
     return self;

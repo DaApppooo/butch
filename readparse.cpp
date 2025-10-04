@@ -24,6 +24,7 @@ int main(int argc, const char** argv)
   }
   auto start = std::chrono::system_clock::now();
   auto res = Parser::read_file(argv[1]);
+  auto read_end = std::chrono::system_clock::now();
   if (res.type == ERR)
   {
     switch (res.err.type)
@@ -126,7 +127,9 @@ int main(int argc, const char** argv)
   auto& p = res.ok;
   p.debug(stdout);
   p.flags = flags;
+  auto parse_start = std::chrono::system_clock::now();
   Parser::FileParse fp = p.parse_file(argv[2]);
+  auto parse_end = std::chrono::system_clock::now();
   if (fp.parsed_code == nullptr)
   {
     fprintf(stderr, "Failed to open file_to_parse: '%s'\n", argv[2]);
@@ -137,8 +140,13 @@ int main(int argc, const char** argv)
   free(fp.parsed_code);
   p.destroy();
   auto end = std::chrono::system_clock::now();
-  std::chrono::duration<double> secs = end - start;
+  using dt_t = std::chrono::duration<double>;
+  dt_t secs = end - start;
+  dt_t readin = read_end - start;
+  dt_t parsin = parse_end - parse_start;
   printf("Done in %lf seconds.\n", secs.count());
+  printf("Reading only took %lf seconds.\n", readin.count());
+  printf("Parsing only took %lf seconds.\n", parsin.count());
   return 0;
 }
 
