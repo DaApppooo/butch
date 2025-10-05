@@ -1,4 +1,5 @@
 #include "butch.hpp"
+#include "stuff.hpp"
 #include <cctype>
 
 #define assume(X) do { assert(X); [[assume(X)]]; } while(false)
@@ -16,7 +17,6 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
 {
   char* start = s;
   const uint32_t init_len = rulesets_rules.len();
-  printf("<> %s\n", _load_str(classes[r.out]));
   while (*s != '\n' && *s != '#')
   {
     if (*s == '"')
@@ -197,8 +197,28 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     }
     else if (*s == '+')
     {
+      if (cctx == GLOBAL_CONTEXT)
+      {
+        const u32 offset = s - self.butch_code;
+        self.destroy();
+        return err<Parser>(Error{
+          .type=Error::MISPLACED_COPY,
+          .offset=offset
+        });
+      }
       s++;
       SKIP_SPACES_ONLY;
+      if (*s == '\n')
+      {
+        const u32 glob_len = self.ctxs[0].rules_start;
+        for (u32 i = 0; i < glob_len; i++)
+        {
+          if (self.rules[i].is_alias())
+            continue;
+          self.rules.push(self.rules[i]);
+          self.ctxs[cctx].rule_count++;
+        }
+      }
       do
       {
         start = s;
@@ -206,19 +226,30 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
           s++;
         class_name = View<char>(start, s);
         const class_id cid = self._find_or_make_class(class_name);
-        const rule_id rid = self._find_rule(cid);
-        if (rid == Rule::UNKNOWN_RULE)
+        const ctx_id ctid = self._find_ctx(cid);
+        if (ctid != GLOBAL_CONTEXT)
         {
-          const ctx_id ctid = self._find_ctx(cid);
-          assert(false); // TODO
+          const Context& ctx = self.ctxs[ctid];
+          const u32 ie = ctx.rules_start+ctx.rule_count;
+          for (u32 i = ctx.rules_start; i < ie; i++)
+          {
+            if (self.rules[i].out > 0 && !self.rules[i].is_alias())
+            {
+              self.rules.push(self.rules[i]);
+              self.ctxs[cctx].rule_count++;
+            }
+          }
         }
         else
         {
-          // TODO : dependecies
-          self.rules.push(Rule::init());
-          self.rules.atn(-1) = self.rules[rid];
-          if (cctx >= 0)
+          const rule_id rid = self._find_rule(cid);
+          if (rid == Rule::UNKNOWN_RULE)
+            ERROR_CN(Error::UNDECLARED_RULE, cid);
+          if (!self.rules[rid].is_alias())
+          {
+            self.rules.push(self.rules[rid]);
             self.ctxs[cctx].rule_count++;
+          }
         }
         SKIP_SPACES_ONLY;
       } while (*s != '\n');
@@ -372,7 +403,11 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     {
       if (self.ctxs[i].begin[j] != Rule::UNKNOWN_RULE)
         continue;
-      const Context& src = self.ctxs[self.ctxs[i].end[j]];
+      const class_id cid = self.ctxs[i].end[j];
+      const ctx_id ctid = self._find_ctx(cid);
+      if (ctid == GLOBAL_CONTEXT)
+        ERROR_CN(Error::UNDECLARED_CONTEXT, cid);
+      const Context& src = self.ctxs[ctid];
       const rule_id brid = src.begin[0];
       const rule_id erid = src.end[0];
       if (brid == Rule::UNKNOWN_RULE)

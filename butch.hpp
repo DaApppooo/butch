@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <regex>
 #include <type_traits>
 #include "list.hpp"
 
@@ -326,6 +327,8 @@ Use the parser to parse your custom language with:
 */
 struct Parser
 {
+  using RegexMatch = std::match_results<char*, std::string::allocator_type>;
+  using RegexPatt = std::basic_regex<char>;
   FLAG_T FLAG_TRIM_SPACE_LITERALS     = 0b0001U;
   // Equivalent to surrounding the string with regex's \b
   // (you can't do that in butch)
@@ -347,15 +350,16 @@ struct Parser
       NONE, // for internal use only
       DOUBLE_QUOTE_MISMATCH, // .offset
       SINGLE_QUOTE_MISMATCH, // .offset
-      CANT_OPEN_FILE,
-      UNDECLARED_RULE, // .name
-      UNDECLARED_CONTEXT, // .name
-      MISPLACED_PLUS, // .name (name of the rule where the error occured)
-      MISPLACED_PREPEEP, // (same as MISPLACED_PLUS)
-      DOUBLE_PREPEEP, // (same as MISPLACED_PLUS)
-      DOUBLE_POSTPEEP, // (same as MISPLACED_PLUS)
-      MISPLACED_NOT, // (same as MISPLACED_PLUS)
-      ALIAS_SYNTAX_ERROR, // .name (same as MISPLACED_PLUS)
+      MISPLACED_COPY, // .offset
+      CANT_OPEN_FILE, // none
+      UNDECLARED_RULE, //    .name
+      UNDECLARED_CONTEXT, // same for all errors from this point
+      MISPLACED_PLUS,
+      MISPLACED_PREPEEP,
+      DOUBLE_PREPEEP,
+      DOUBLE_POSTPEEP,
+      MISPLACED_NOT,
+      ALIAS_SYNTAX_ERROR,
       RULE_SYNTAX_ERROR,
       CONTEXT_MISSING_BEGIN,
       CONTEXT_MISSING_END,
@@ -370,7 +374,7 @@ struct Parser
   };
   struct RulePack
   { View<char> class_name; Rule rule; };
-  char* butch_code;
+  Own<char*> butch_code;
   list<Context> ctxs;
   list<Rule> rules;
   list<View<char>> classes;
@@ -378,6 +382,7 @@ struct Parser
   // to sequence then in memory
   list<rule_id> rulesets_rules; // TODO: use same cap and length data for both
   list<class_id> rulesets_classes;
+  list<RegexPatt> regex_patterns;
   string buff;
   View<char> parsed_code;
   uint32_t flags;
@@ -393,6 +398,7 @@ struct Parser
   {
     rules.init(); classes.init();
     rulesets_rules.init(); rulesets_classes.init();
+    regex_patterns.init();
     ctxs.init();
     buff.init();
   }
@@ -435,7 +441,7 @@ struct Parser
   );
   // same as _load but transforms "\\n" into "\n"
   const char* _comp_str(View<char> s);
-  View<char> _rgx_match(View<char> big, View<char> pattern);
+  View<char> _rgx_match(View<char> big, const RegexPatt& pattern);
   bool _is_to_be_trimmed(uint32_t begin, uint32_t len);
   RulePack operator [] (int index)
   { return {classes[index], rules[index]}; }

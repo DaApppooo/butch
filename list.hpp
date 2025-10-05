@@ -167,6 +167,7 @@ struct View<char>
   constexpr View(char* start, char* end) : start(start), len(end-start) {}
   constexpr View(const View<char>& v) : start(v.start), len(v.len) {}
   constexpr View(const View<char>&& v) : start(v.start), len(v.len) {}
+  char* end() { return start + len; }
   char& operator [] (int index) const
   { if (index < 0) index += len; return start[index]; }
   View<char>& operator = (const View<char>& v)

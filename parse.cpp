@@ -2,7 +2,8 @@
 #include "list.hpp"
 #include <cstdio>
 #include <functional>
-#include <regex.h>
+// #include <regex.h>
+#include <regex>
 #include <cctype>
 #include "stuff.hpp"
 
@@ -67,34 +68,22 @@ View<char> _butch_str_match(View<char> big, View<char> pattern, u8 iso)
   return View<char>(nullptr, nullptr);
 }
 
-View<char> Parser::_rgx_match(View<char> big, View<char> pattern)
+View<char> Parser::_rgx_match(View<char> big, const RegexPatt& pattern)
 {
   constexpr View<char> failed = View<char>(nullptr, nullptr);
-  regex_t patt;
-  int res;
-  regmatch_t match;
   const View<char> surround = flags & FLAG_ISOLATED_MODE_REGEX
                               ? View<char>((char*)"\\b", 2)
                               : View<char>(nullptr, nullptr);
   const View<char> start = flags & _FLAG_START_FIXED_MATCH
                            ? View<char>((char*)"^", 1)
                            : View<char>(nullptr,nullptr);
-  const char* const cstr_patt = _load_str(pattern, surround, start);
-  res = regcomp(&patt, cstr_patt, REG_EXTENDED);
-  if (res)
+  // const char* const cstr_patt = _load_str(pattern, surround, start);
+  // RegexPatt regex_patt(cstr_patt);
+  RegexMatch m;
+  if (std::regex_search(big.start, big.end(), m, pattern)) // std::regex_constants::nosubs
   {
-    fprintf(stderr, "WARN: Failure to compile regex '%s': ",
-            buff.data());
-    buff.prealloc(256);
-    const size_t w = regerror(res, &patt, buff.data(), buff._cap);
-    if (w == 0) { strcpy(buff.data(), "???"); }
-    fprintf(stderr, "%s\n", buff.data());
-    return failed;
+    return View<char>(m[0].first, m[0].second);
   }
-  res = regexec(&patt, _load_str(big), 1, &match, 0);
-  regfree(&patt);
-  if (!res)
-    return View<char>(big.start+match.rm_so, big.start+match.rm_eo);
   return failed;
 }
 
@@ -187,10 +176,11 @@ Match Rule::_match_rgx(
 ) {
   View<char> s;
   const View<char> big = units[u[-1].u].str(p);
-  const View<char> patt = p.classes[cid].shorten(1,1);
+  const View<char> patt = p.classes[cid];
+  expect(patt.start == nullptr);
   if (units[u[-1].u].ctx != -1)
     return BUTCH_FAIL;
-  if ((s = p._rgx_match(big, patt)).start)
+  if ((s = p._rgx_match(big, p.regex_patterns[patt.len])).start)
   {
     u[-1].r++;
     _next(u[-1].u, units);
@@ -244,13 +234,14 @@ void Rule::_apply_context(
   const u32 units_s_len = parent->s_len;
   const u16 begin_len = m.u_start;
   const u16 end_len = m.u_end;
-  if (units_s_start < m.s_start)
+  const i32 head_len = i32(m.s_start) - units_s_start - begin_len;
+  if (head_len > 0 && !p._is_to_be_trimmed(units_s_start, head_len))
   {
     assert(m.s_start - units_s_start - begin_len > 0);
     units.insert(Unit(
       Unit::LITERAL,
       units_s_start,
-      m.s_start - units_s_start - begin_len,
+      head_len,
       0
     ), 0);
     units.start++;
@@ -259,32 +250,34 @@ void Rule::_apply_context(
   parent = &units[0];
   parent->s_start = m.s_start;
   parent->s_len = m.s_len;
-  parent->id = out;
-  parent->children_len = 1;
-  assert(m.s_len < 32);
-  units.insert(Unit( // <-- the child
-    Unit::LITERAL,
-    m.s_start,
-    m.s_len,
-    0
-  ), 1);
-  units.start++;
-  units.len--;
-  while (common_malcom_do_somethin)
+  parent->id = this - p.rules.data();
+  parent->children_len = m.s_len > 0;
+  if (m.s_len > 0)
   {
-    common_malcom_do_somethin = false;
-    for (Rule& r : p.rules.slice(ctx.rules_start, ctx.rule_count))
+    units.insert(Unit( // <-- the child
+      Unit::LITERAL,
+      m.s_start,
+      m.s_len,
+      0
+    ), 1);
+    units.start++;
+    units.len--;
+    while (common_malcom_do_somethin)
     {
-      if (r.out == Rule::BEGIN || r.out == Rule::END)
-        continue;
-      common_malcom_do_somethin =
-        p._check_and_do_rule(r, units, u)
-        || common_malcom_do_somethin;
+      common_malcom_do_somethin = false;
+      for (Rule& r : p.rules.slice(ctx.rules_start, ctx.rule_count))
+      {
+        if (r.out == Rule::BEGIN || r.out == Rule::END)
+          continue;
+        common_malcom_do_somethin =
+          p._check_and_do_rule(r, units, u)
+          || common_malcom_do_somethin;
+      }
     }
+    units.start--;
+    units[0].children_len = units.len;
+    units.len++;
   }
-  units.start--;
-  units[0].children_len = units.len;
-  units.len++;
   const i32 total_end = units_s_start+units_s_len;
   const i32 ctx_end = m.s_start+m.s_len+m.u_end;
   const i32 tail_len = total_end - ctx_end;
@@ -320,6 +313,8 @@ Match Rule::_match_context(
   assert(p.rules.atp(ctx.begin[0]).is_token());
   assert(p.rules.atp(ctx.end[0]).is_token());
   assert(units.len == 1);
+  const u32 units_s_start = units[0].s_start;
+  const u32 units_s_end = units_s_start + units[0].s_len;
   depth.init();
   m = p.rules[ctx.begin[0]]._sequence_match(p, units, u);
   if (!m.matched)
@@ -327,19 +322,26 @@ Match Rule::_match_context(
     units.reset(state);
     return TOTAL_FAILURE;
   }
+  units[0].s_len = m.s_start - units[0].s_start + 1;
+  for (int i = 1; i < ctx.be_count; i++)
+  {
+    sub_m = p.rules[ctx.begin[i]]._sequence_match(p, units, u);
+    if (sub_m.matched && sub_m.s_start < m.s_start)
+    {
+      units[0].s_len = units_s_end - units_s_start;
+      return TOTAL_FAILURE;
+    }
+  }
   // we temporarily enable _FLAG_START_FIXED_MATCH
   p.flags |= Parser::_FLAG_START_FIXED_MATCH;
   depth.push(0);
-  const u32 units_s_start = units[0].s_start;
-  const u32 units_s_end = units_s_start + units[0].s_len;
   units[0].s_start = m.s_start;
   units[0].s_start += m.s_len;
-  units[0].s_len -= units_s_end - units[0].s_start - m.s_len;
+  units[0].s_len = units_s_end - units[0].s_start;
   while (depth.len() > 0)
   {
     for (u8 i : range(ctx.be_count))
     {
-      assert(units[0].s_len > 0);
       sub_m = p.rules[ctx.end[i]]._sequence_match(p, units, u);
       if (sub_m.matched)
       {
@@ -365,7 +367,7 @@ Match Rule::_match_context(
     }
     units[0].s_start++;
     units[0].s_len--;
-    if (units[0].s_start >= units_s_end)
+    if (units[0].s_start >= units_s_end && depth.len() > 0)
     {
       m = BUTCH_FAIL;
       goto FAILURE;
@@ -379,7 +381,6 @@ Match Rule::_match_context(
     .u_start = u16(m.s_len),
     .u_end = u16(sub_m.s_len)
   };
-  assert(m.s_len < 32);
   units[0].s_start = units_s_start;
   units[0].s_len = units_s_end - units_s_start;
   p.flags &= ~p._FLAG_START_FIXED_MATCH;
@@ -388,7 +389,6 @@ Match Rule::_match_context(
 FAILURE:
   units[0].s_start = units_s_start;
   units[0].s_len = units_s_end - units_s_start;
-  assert(units[0].s_len < 32);
   units.reset(state);
   p.flags &= ~p._FLAG_START_FIXED_MATCH;
   depth.destroy();
@@ -450,12 +450,12 @@ Match Rule::_sequence_match(
         not_flag = true;
         u[-1].r++;
         break;
-      case PREPEEP:
+      case PREPEEP: [[unlikely]];
         assert(!is_token());
         ret.u_start = u[-1].u;
         u[-1].r++;
         break;
-      case POSTPEEP:
+      case POSTPEEP: [[unlikely]];
         assert(!is_token());
         ret.u_end = u[-1].u;
         u[-1].r++;
@@ -513,7 +513,7 @@ Match Rule::_sequence_match(
         if (ret.include(_match_rgx(p, units.to_view(), u, *CPTR(-1))))
           return failure;
         break;
-      default:
+      default: [[likely]];
         if (p.rules[*RPTR(-1)].is_alias())
         { // aliases
           if (_butch_alias_match(
@@ -683,10 +683,6 @@ bool Parser::_check_and_do_rule(
         _next(j, out.to_view());
       }
     }
-  }
-  for (int i = 0; i < out.len; i++)
-  {
-    assert(out[i].s_len < 32);
   }
   return did_something;
 }

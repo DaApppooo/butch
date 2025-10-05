@@ -118,8 +118,12 @@ int main(int argc, const char** argv)
         );
         free(res.err.name);
         break;
+      // case Parser::Error::MISPLACED_COPY:
+      //   fprintf(stderr,
+
+      //   );
       default:
-        fprintf(stderr, "Unknown error.\n");
+        fprintf(stderr, "Unknown error (%i).\n", res.err.type);
         break;
     }
     return 1;

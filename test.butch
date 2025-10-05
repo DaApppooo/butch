@@ -1,16 +1,26 @@
 
-! Parenthesis
-Name = '[a-z]'
+# ! Parenthesis
+# ! Brackets
+# ! Braces
+# Name = '[a-z]'
 
-= Parenthesis
-  Begin = "("
-  End = ")"
-  ! Parenthesis
-  ! Brackets
-  + Name
+# = Parenthesis Brackets Braces
+#   Begin = "("
+#   End = ")"
+#   ! Parenthesis
+#   ! Brackets
+#   + Name
 
-= Brackets
-  Begin = "[["
-  End = "]]"
-  + Name
+# = Brackets Parenthesis Braces
+#   Begin = "["
+#   End = "]"
+#   ! Parenthesis
+#   + Name
+
+# = Braces Parenthesis Brackets
+#   Begin = "{"
+#   End = "}"
+
+
+Name = '\w+'
 

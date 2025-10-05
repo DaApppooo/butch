@@ -144,13 +144,13 @@ Contexts require that the unit that should match ARGUMENTS is a literal. The lit
 Depth awareness can also mix multiple context begins and ends for a single context (that's mixed contexts). For example, you could imagine that you want a specific context for parenthesis, braces and brackets, and that a mix of these three can be contained in each of them. Here's how you'd write that:
 
 ```
-= PARENTHESIS : BRACES BRACKETS
+= PARENTHESIS BRACES BRACKETS
   Begin = "("
   End = ")"
-= BRACES : PARENTHESIS BRACKETS
+= BRACES PARENTHESIS BRACKETS
   Begin = "{"
   End = "}"
-= BRACKETS : BRACES BRACKETS
+= BRACKETS BRACES BRACKETS
   Begin = "["
   End = "]"
 ```
@@ -158,11 +158,11 @@ Depth awareness can also mix multiple context begins and ends for a single conte
 Sometimes it can be useful to include rules of other contexts within the current context without having to rewrite it. Here's an example of how to do that:
 
 ```
-= PARENTHESIS : BRACES
+= PARENTHESIS BRACES
   Begin = "("
   End = ")"
   Separator = ","
-= BRACES : PARENTHESIS
+= BRACES PARENTHESIS
   Begin = "{"
   End = "}"
   + Separator
@@ -188,18 +188,18 @@ Indexing = Name BRACKETS
 VarDecl = ?Type Name
 Assignement <= ?Variable Eq ?Atom
 Statement = VarDecl StatementEnd
-= PARENTHESIS : BRACKETS
+= PARENTHESIS BRACKETS
   Begin = "("
   End = ")"
   + Name Int VarDecl
-= BRACKETS : PARENTHESIS
+= BRACKETS PARENTHESIS
   Begin = "["
   End = "]"
   +
   + PARENTHESIS
 ```
 
-> Specifying both `Name` and `VarDecl` in the `PARENTHESIS` context is useless, because dependencies are resolved, so only specifying `VarDecl` would also copy `Name` (and it has the side effect of also copying `Indexing`). 
+> Specifying both `Name` and `VarDecl` in the `PARENTHESIS` context is necessary
 
 ### Side effects [TODO]
 
