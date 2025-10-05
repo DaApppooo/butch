@@ -127,8 +127,8 @@ Contexts are what enables depth awareness with parenthesis, braces, brackets, st
 The rules within a context won't be tested unless a context rule is declared within a context. Here's an example:
 
 ```
-Name = '\w+'
 ! ARGUMENTS # new rule with the 'ARGUMENT' class as an output
+Name = '\w+'
 Call = Name ARGUMENTS
 = ARGUMENTS
   Begin = "("
