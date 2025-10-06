@@ -7,12 +7,12 @@ if [[ $1 = "pg" ]];
 then
   # to use with KCacheGrind
   g++ $SRC -o readparse -g || exit 1
-  ./readtest ./test.butch ./test.code
-  valgrind --tool=callgrind --callgrind-out-file=callgrind.output ./readtest test.butch test.code || exit 1
+  ./readparse ./test.butch ./test.code
+  valgrind --tool=callgrind --callgrind-out-file=callgrind.output ./readparse test.butch test.code || exit 1
 elif [[ $1 = "san" ]];
 then
-  g++ $SRC -o readparse -g --sanitize=address || exit 1
-  ./readtest ./test.butch ./test.code
+  g++ $SRC -o readparse -g --sanitize=address || echo Failure && exit 1)
+  ./readparse ./test.butch ./test.code
 elif [[ $1 = "db" ]];
 then
   # simple gdb

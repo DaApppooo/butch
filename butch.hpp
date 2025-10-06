@@ -468,6 +468,11 @@ struct Parser
     rulesets_classes.destroy();
     rulesets_rules.destroy();
     ctxs.destroy();
+    for (int i = 0; i < regex_patterns.len(); i++)
+    {
+      regex_patterns[i].~basic_regex();
+    }
+    regex_patterns.destroy();
   }
 };
 

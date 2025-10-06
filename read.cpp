@@ -28,8 +28,14 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
     else if (*s == '\'')
     {
       start = s;
-      SKIP_STRING('\'')
-      _push_rc(Rule::REGEX, _find_or_make_class(View(start, ++s)));
+      SKIP_STRING('\'');
+      const auto pattern = View<char>(start+1, s++);
+      const char* const cstr_patt = _load_str(pattern);
+      regex_patterns.push(RegexPatt());
+      regex_patterns[-1] = RegexPatt(cstr_patt);
+      const View<char> v = View<char>(nullptr, regex_patterns.len()-1);
+      classes.push(v);
+      _push_rc(Rule::REGEX, classes.len()-1);
     }
     else
     {
@@ -431,9 +437,14 @@ void Parser::debug(FILE* f)
   fprintf(f, "=== Classes (4 columns) ===\n");
   for (View<char>& t : classes)
   {
-    c = t.fix();
-    fprintf(f, "  %s", t.start);
-    t.mov(c);
+    if (t.start)
+    {
+      c = t.fix();
+      fprintf(f, "  %s", t.start);
+      t.mov(c);
+    }
+    else
+      fprintf(f, "  <compiled regex>");
     i++;
     if (i >= 4)
     {
@@ -509,6 +520,8 @@ void Parser::debug(FILE* f)
               break;
           }
           fprintf(f, "%s", p);
+        } else if (in_rule(r, i) == Rule::REGEX) {
+          fprintf(f, " <compiled regex>"); 
         } else {
           c = classes[in_class(r, i)].fix();
           fprintf(f, " %s", classes[in_class(r, i)].start);

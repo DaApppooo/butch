@@ -213,7 +213,9 @@ public:
   list(const list<T>& other) { memcpy(this, &other, sizeof(list<T>)); }
   list(const list<T>&& other) { memcpy(this, &other, sizeof(list<T>)); }
   inline Self& init();
-  inline Self& push(T element);
+  inline Self& push(const T&& element)
+  { push(element); return *this; }
+  inline Self& push(const T& element);
   Self& prextend(View<T> ref_pre);
   Self& extend(View<T> ref_ext);
   inline Self& insert(T element, int index);
@@ -418,7 +420,7 @@ GEN inline Self& list<T>::prealloc(uint32_t size)
 }
 
 // content of element is owned
-GEN inline Self& list<T>::push(T element)
+GEN inline Self& list<T>::push(const T& element)
 {
   uint32_t l = len();
   l++;
@@ -437,7 +439,7 @@ GEN inline Self& list<T>::push(T element)
       _data = (T*)::realloc(_data, sizeof(T) * _cap);
     }
   }
-  _data[l - 1] = element;
+  memcpy(_data + (l - 1), &element, sizeof(T));
   _len = l;
   return self;
 }
