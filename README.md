@@ -201,6 +201,18 @@ Statement = VarDecl StatementEnd
 
 > Specifying both `Name` and `VarDecl` in the `PARENTHESIS` context is necessary
 
+To handle string-like elements within a context, butch has a type of rule called "depth-stoppers". These rules have the same properties as `Begin` and `End` rules, that is, they must be token-like and are matched with the equivalent of the `^` regex symbol. When these rules are matched, the context matcher skips the match to ensure no partial sub-context match within the depth-stopper. For example, if you've got this bit of butch code:
+
+```
+String = '".*?[^\\]"'
+= PARENTHESIS
+  Begin = "("
+  End = ")"
+  + String
+```
+
+In this example, the piece of code `("(")` would detect a context begin/end mismatch. To handle 
+
 ### Side effects [TODO]
 
 When declaring a rule, you might want to add some side effects to the output if the rule successfuly matched. This can be achieved with curly braces put on the right of the ruleset element you want to add side effects to. For example, if you want to remove a unit once the rule is matched, you can use the `del` keyword:
