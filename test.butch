@@ -1,15 +1,18 @@
 
-# ! Parenthesis
+! Parenthesis
 # ! Brackets
 # ! Braces
-# Name = '[a-z]'
+String ='".*?[^\\]"'
+Name = '[a-z]+'
 
-# = Parenthesis Brackets Braces
-#   Begin = "("
-#   End = ")"
-#   ! Parenthesis
-#   ! Brackets
-#   + Name
+= Parenthesis # Brackets Braces
+  Begin = "("
+  End = ")"
+  + String
+  ! Parenthesis
+  # ! Brackets
+  + Name
+
 
 # = Brackets Parenthesis Braces
 #   Begin = "["
@@ -20,7 +23,3 @@
 # = Braces Parenthesis Brackets
 #   Begin = "{"
 #   End = "}"
-
-
-Name = '\w+'
-

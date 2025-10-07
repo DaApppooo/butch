@@ -361,6 +361,7 @@ struct Parser
       MISPLACED_NOT,
       ALIAS_SYNTAX_ERROR,
       RULE_SYNTAX_ERROR,
+      REGEX_SYNTAX_ERROR,
       CONTEXT_MISSING_BEGIN,
       CONTEXT_MISSING_END,
       CONTEXT_TOO_MANY_INHERITS
@@ -467,6 +468,7 @@ struct Parser
     rules.destroy();
     rulesets_classes.destroy();
     rulesets_rules.destroy();
+    buff.destroy();
     ctxs.destroy();
     for (int i = 0; i < regex_patterns.len(); i++)
     {

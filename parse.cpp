@@ -713,6 +713,8 @@ list<Unit> Parser::parse(Ref<char*> s)
     if (!did_something) break;
   }
 
+  pt_buffer.destroy();
+
   return out.ls();
 }
 
@@ -733,9 +735,11 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     {
       const class_id cid = ctxs[ls[i].ctx].name;
       c = classes[cid].fix();
-      printf("(%s)", classes[cid].start);
+      fprintf(f, "(%s)", classes[cid].start);
       classes[cid].mov(c);
     }
+    else if (ls[i].ctx == Unit::ERROR_CONTEXT_MISMATCH)
+      fprintf(f, "(!CONTEXT_MISMATCH)");
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
     for (int j = 0; j < s.len; j++)

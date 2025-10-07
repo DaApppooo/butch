@@ -1,6 +1,7 @@
 #include "butch.hpp"
 #include "stuff.hpp"
 #include <cctype>
+#include <regex>
 
 #define assume(X) do { assert(X); [[assume(X)]]; } while(false)
 
@@ -30,9 +31,24 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
       start = s;
       SKIP_STRING('\'');
       const auto pattern = View<char>(start+1, s++);
-      const char* const cstr_patt = _load_str(pattern);
+      const View<char> surround =
+        flags & FLAG_ISOLATED_MODE_REGEX
+        ? View((char*)"\\b", 3) : View<char>(nullptr, nullptr);
+      const View<char> start =
+        r.out == Rule::BEGIN || r.out == Rule::END
+        ? View((char*)"^", 1) : View<char>(nullptr, nullptr);
+      const char* const cstr_patt = _load_str(pattern, surround, start);
       regex_patterns.push(RegexPatt());
-      regex_patterns[-1] = RegexPatt(cstr_patt);
+      try
+      {
+        regex_patterns[-1] = RegexPatt(cstr_patt);
+      }
+      catch (std::regex_error& err)
+      {
+         classes.push(View<char>((char*)err.what(), 0U));
+         r.out = classes.len()-1;
+         return Error::REGEX_SYNTAX_ERROR;
+      }
       const View<char> v = View<char>(nullptr, regex_patterns.len()-1);
       classes.push(v);
       _push_rc(Rule::REGEX, classes.len()-1);
@@ -176,7 +192,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       ctx.begin[0] = ctx.end[0] = Rule::UNKNOWN_RULE;
       ctx.be_count = 1;
       SKIP_SPACES_ONLY;
-      while (*s != '\n' && *s != 0)
+      while (*s != '\n' && *s != '#' && *s != 0)
       {
         if (ctx.be_count >= 4)
           ERROR_CN(Error::CONTEXT_TOO_MANY_INHERITS, ctx.name);
@@ -227,6 +243,8 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       }
       do
       {
+        if (*s == '#')
+          break;
         start = s;
         while (!isspace(*s))
           s++;

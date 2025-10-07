@@ -118,10 +118,26 @@ int main(int argc, const char** argv)
         );
         free(res.err.name);
         break;
-      // case Parser::Error::MISPLACED_COPY:
-      //   fprintf(stderr,
-
-      //   );
+      case Parser::Error::MISPLACED_COPY:
+        fprintf(stderr,
+          "Misplaced copy operator (+ at %u): you can only copy rules "
+          "outside of the global context.\n",
+          res.err.offset
+        );
+        break;
+      case Parser::Error::RULE_SYNTAX_ERROR:
+        fprintf(stderr,
+          "Rule syntax error for rule with output class '%s'. See the"
+          "README.md for the full syntax.\n",
+          res.err.name
+        );
+        break;
+      case Parser::Error::REGEX_SYNTAX_ERROR:
+        fprintf(stderr,
+          "Regex syntax error: %s",
+          res.err.name
+        );
+        break;
       default:
         fprintf(stderr, "Unknown error (%i).\n", res.err.type);
         break;
@@ -142,6 +158,7 @@ int main(int argc, const char** argv)
   puts("=== Output: ===");
   p.debug_output(stdout, fp.units.to_view());
   free(fp.parsed_code);
+  fp.units.destroy();
   p.destroy();
   auto end = std::chrono::system_clock::now();
   using dt_t = std::chrono::duration<double>;
