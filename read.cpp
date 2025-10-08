@@ -140,9 +140,6 @@ ctx_id Parser::_find_ctx(class_id class_name)
   return GLOBAL_CONTEXT;
 }
 
-Result<Parser, Parser::Error> Parser::read(Own<char*> s)
-{
-#define ALLOCPY_CN(CLASS_ID) _butch_allocpy_view(self.classes[CLASS_ID])
 #define ERROR_CN(ERR, CLASS_ID) \
           { start = ALLOCPY_CN(CLASS_ID); \
           self.destroy(); \
@@ -150,15 +147,166 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
             .type=ERR, \
             .name=start \
           }); }
-  if (s == nullptr)
-    return err<Parser>(Error{Error::CANT_OPEN_FILE, 0});
-  Parser self;
-  self.butch_code = s;
-  
+
+Parser::Error::Type _butch_ctx_change(
+  Parser& self,
+  char*& s,
+  char* start,
+  ctx_id& cctx
+) {
+  s++;
+  SKIP_SPACES_ONLY;
+  start = s;
+  while (isalnum(*s)) s++;
+  cctx = self.ctxs.len();
+  self.ctxs.push(Context{});
+  Context& ctx = self.ctxs.atn(-1);
+  ctx.rulesets_start = self.rulesets_rules.len();
+  ctx.rules_start = self.rules.len();
+  ctx.rule_count = 0;
+  ctx.name = self._find_or_make_class(View<char>(start, s));
+  ctx.begin[0] = ctx.end[0] = Rule::UNKNOWN_RULE;
+  ctx.be_count = 1;
+  SKIP_SPACES_ONLY;
+  while (*s != '\n' && *s != '#' && *s != 0 && *s != '!')
+  {
+    if (ctx.be_count >= 4)
+      return Parser::Error::CONTEXT_SPECS_ERROR;
+    start = s;
+    while (isalnum(*s)) s++;
+    const class_id cid
+      = self._find_or_make_class(View<char>(start, s));
+    const ctx_id ctxid = self._find_ctx(cid);
+    if (ctxid == GLOBAL_CONTEXT
+        || self.ctxs[ctxid].begin[0] == Rule::UNKNOWN_RULE
+        || self.ctxs[ctxid].end[0] == Rule::UNKNOWN_RULE
+    ) { // failed to find context, will be resolved later
+      ctx.begin[ctx.be_count] = Rule::UNKNOWN_RULE;
+      ctx.end[ctx.be_count++] = cid;
+    }
+    else
+    {
+      ctx.begin[ctx.be_count] = self.ctxs[ctxid].begin[0];
+      ctx.end[ctx.be_count++] = self.ctxs[ctxid].end[0];
+    }
+    SKIP_SPACES_ONLY;
+  }
+  if (*s == '!') // depth-stoppers
+  {
+    s++;
+    SKIP_SPACES_ONLY;
+    do {
+      if (ctx.ds_count >= 4)
+        return Parser::Error::CONTEXT_SPECS_ERROR;
+      start = s;
+      while (isalnum(*s)) s++;
+      const class_id cid
+        = self._find_or_make_class(View<char>(start, s));
+      const ctx_id rid = self._find_rule(cid);
+      if (cid == Rule::BEGIN || cid == Rule::END)
+        return Parser::Error::CONTEXT_SPECS_ERROR;
+      if (rid == Rule::UNKNOWN_RULE)
+        // failed to find rule, will be resolved later
+        ctx.depth_stoppers[ctx.ds_count++] = -cid;
+      else
+        ctx.depth_stoppers[ctx.ds_count++] = rid;
+      SKIP_SPACES_ONLY;
+    } while (*s != '\n' && *s != '#' && *s != 0);
+  }
+  return Parser::Error::NONE;
+}
+
+class_id _butch_copy_object(
+  Parser& self,
+  char*& s,
+  char* start,
+  const ctx_id cctx
+) {
   View<char> class_name;
-  ctx_id cctx = GLOBAL_CONTEXT;
-  char* start = s;
-  bool rl_parse = false; // lr by default
+
+  s++;
+  SKIP_SPACES_ONLY;
+  if (*s == '\n')
+  {
+    const u32 glob_len = self.ctxs[0].rules_start;
+    for (u32 i = 0; i < glob_len; i++)
+    {
+      if (self.rules[i].is_alias())
+        continue;
+      self.rules.push(self.rules[i]);
+      self.ctxs[cctx].rule_count++;
+    }
+  }
+  do
+  {
+    if (*s == '#')
+      break;
+    start = s;
+    while (!isspace(*s))
+      s++;
+    class_name = View<char>(start, s);
+    const class_id cid = self._find_or_make_class(class_name);
+    const ctx_id ctid = self._find_ctx(cid);
+    if (ctid != GLOBAL_CONTEXT)
+    {
+      const Context& ctx = self.ctxs[ctid];
+      const u32 ie = ctx.rules_start+ctx.rule_count;
+      for (u32 i = ctx.rules_start; i < ie; i++)
+      {
+        if (self.rules[i].out > 0 && !self.rules[i].is_alias())
+        {
+          self.rules.push(self.rules[i]);
+          self.ctxs[cctx].rule_count++;
+        }
+      }
+    }
+    else
+    {
+      const rule_id rid = self._find_rule(cid);
+      if (rid == Rule::UNKNOWN_RULE)
+        return cid;
+      if (!self.rules[rid].is_alias())
+      {
+        self.rules.push(self.rules[rid]);
+        self.ctxs[cctx].rule_count++;
+      }
+    }
+    SKIP_SPACES_ONLY;
+  } while (*s != '\n');
+  return -1;
+}
+
+void _butch_ctx_rule(
+  Parser& self,
+  char*& s,
+  char* start,
+  const ctx_id cctx
+) {
+  View<char> class_name;
+
+  s++;
+  SKIP_SPACES_ONLY;
+  do
+  {
+    start = s;
+    while (!isspace(*s))
+      s++;
+    class_name = View<char>(start, s);
+    const class_id cid = self._find_or_make_class(class_name);
+    const ctx_id ctid = self._find_ctx(cid);
+    if (ctid == GLOBAL_CONTEXT)
+      self.rules.push(Rule::init_unknown_context(cid));
+    else
+      self.rules.push(Rule::init_context(cid, ctid));
+    if (cctx >= 0)
+      self.ctxs[cctx].rule_count++;
+    SKIP_SPACES_ONLY;
+  } while (*s != '\n');
+}
+
+Result<Parser, Parser::Error> Parser::read(Own<char*> s)
+{
+#define ALLOCPY_CN(CLASS_ID) _butch_allocpy_view(self.classes[CLASS_ID])
 #define CHECK_COMMENTS \
     if (*s == '#') \
     { \
@@ -166,6 +314,18 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       s++; \
       continue; \
     }
+
+  if (s == nullptr)
+    return err<Parser>(Error{Error::CANT_OPEN_FILE, 0});
+  Parser self;
+  self.butch_code = s;
+  
+  View<char> class_name;
+  Error::Type errc;
+  ctx_id cctx = GLOBAL_CONTEXT;
+  class_id cid;
+  char* start = s;
+  bool rl_parse = false; // lr by default
 
   while (*s != 0)
   {
@@ -177,44 +337,9 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     if (*s == 0) break;
 
     if (*s == '=')
-    { // context change
-      s++;
-      SKIP_SPACES_ONLY;
-      start = s;
-      while (isalnum(*s)) s++;
-      cctx = self.ctxs.len();
-      self.ctxs.push(Context{});
-      Context& ctx = self.ctxs.atn(-1);
-      ctx.rulesets_start = self.rulesets_rules.len();
-      ctx.rules_start = self.rules.len();
-      ctx.rule_count = 0;
-      ctx.name = self._find_or_make_class(View<char>(start, s));
-      ctx.begin[0] = ctx.end[0] = Rule::UNKNOWN_RULE;
-      ctx.be_count = 1;
-      SKIP_SPACES_ONLY;
-      while (*s != '\n' && *s != '#' && *s != 0)
-      {
-        if (ctx.be_count >= 4)
-          ERROR_CN(Error::CONTEXT_TOO_MANY_INHERITS, ctx.name);
-        start = s;
-        while (isalnum(*s)) s++;
-        const class_id cid
-          = self._find_or_make_class(View<char>(start, s));
-        const ctx_id ctxid = self._find_ctx(cid);
-        if (ctxid == GLOBAL_CONTEXT
-            || self.ctxs[ctxid].begin[0] == Rule::UNKNOWN_RULE
-            || self.ctxs[ctxid].end[0] == Rule::UNKNOWN_RULE
-        ) { // failed to find context, will be resolved later
-          ctx.begin[ctx.be_count] = Rule::UNKNOWN_RULE;
-          ctx.end[ctx.be_count++] = cid;
-        }
-        else
-        {
-          ctx.begin[ctx.be_count] = self.ctxs[ctxid].begin[0];
-          ctx.end[ctx.be_count++] = self.ctxs[ctxid].end[0];
-        }
-        SKIP_SPACES_ONLY;
-      }
+    { // context change/decl
+      if ((errc = _butch_ctx_change(self, s, start, cctx)) != Error::NONE)
+        ERROR_CN(errc, self.ctxs.atn(-1).name);
       continue;
     }
     else if (*s == '+')
@@ -228,77 +353,13 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
           .offset=offset
         });
       }
-      s++;
-      SKIP_SPACES_ONLY;
-      if (*s == '\n')
-      {
-        const u32 glob_len = self.ctxs[0].rules_start;
-        for (u32 i = 0; i < glob_len; i++)
-        {
-          if (self.rules[i].is_alias())
-            continue;
-          self.rules.push(self.rules[i]);
-          self.ctxs[cctx].rule_count++;
-        }
-      }
-      do
-      {
-        if (*s == '#')
-          break;
-        start = s;
-        while (!isspace(*s))
-          s++;
-        class_name = View<char>(start, s);
-        const class_id cid = self._find_or_make_class(class_name);
-        const ctx_id ctid = self._find_ctx(cid);
-        if (ctid != GLOBAL_CONTEXT)
-        {
-          const Context& ctx = self.ctxs[ctid];
-          const u32 ie = ctx.rules_start+ctx.rule_count;
-          for (u32 i = ctx.rules_start; i < ie; i++)
-          {
-            if (self.rules[i].out > 0 && !self.rules[i].is_alias())
-            {
-              self.rules.push(self.rules[i]);
-              self.ctxs[cctx].rule_count++;
-            }
-          }
-        }
-        else
-        {
-          const rule_id rid = self._find_rule(cid);
-          if (rid == Rule::UNKNOWN_RULE)
-            ERROR_CN(Error::UNDECLARED_RULE, cid);
-          if (!self.rules[rid].is_alias())
-          {
-            self.rules.push(self.rules[rid]);
-            self.ctxs[cctx].rule_count++;
-          }
-        }
-        SKIP_SPACES_ONLY;
-      } while (*s != '\n');
+      if ((cid = _butch_copy_object(self, s, start, cctx)) >= 0)
+        ERROR_CN(Error::UNDECLARED_RULE, cid);
       continue;
     }
     else if (*s == '!')
     {
-      s++;
-      SKIP_SPACES_ONLY;
-      do
-      {
-        start = s;
-        while (!isspace(*s))
-          s++;
-        class_name = View<char>(start, s);
-        const class_id cid = self._find_or_make_class(class_name);
-        const ctx_id ctid = self._find_ctx(cid);
-        if (ctid == GLOBAL_CONTEXT)
-          self.rules.push(Rule::init_unknown_context(cid));
-        else
-          self.rules.push(Rule::init_context(cid, ctid));
-        if (cctx >= 0)
-          self.ctxs[cctx].rule_count++;
-        SKIP_SPACES_ONLY;
-      } while (*s != '\n');
+      _butch_ctx_rule(self, s, start, cctx);
       continue;
     }
 
@@ -349,9 +410,8 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       }
       else if (rl_parse)
         r.has_rl_parse(true);
-      Error::Type error = self._make_rule(r, s);
-      if (error != Error::NONE)
-        ERROR_CN(error, r.out);
+      if ((errc = self._make_rule(r, s)) != Error::NONE)
+        ERROR_CN(errc, r.out);
       if (cctx != GLOBAL_CONTEXT)
       {
         if (r.out == Rule::BEGIN)
@@ -440,6 +500,16 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
         ERROR_CN(Error::CONTEXT_MISSING_END, src.name);
       self.ctxs[i].begin[j] = brid;
       self.ctxs[i].end[j] = erid;
+    }
+    for (uint8_t j = 1; j < self.ctxs[i].ds_count; j++)
+    {
+      if (self.ctxs[i].depth_stoppers[j] >= 0)
+        continue;
+      const class_id cid = -self.ctxs[i].depth_stoppers[j];
+      const rule_id rid = self._find_rule(cid);
+      if (rid == Rule::UNKNOWN_RULE)
+        ERROR_CN(Error::UNDECLARED_RULE, cid);
+      self.ctxs[i].depth_stoppers[j] = rid;
     }
   }
   

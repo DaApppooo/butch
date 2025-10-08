@@ -1,5 +1,6 @@
 #ifndef H_BUTCH
 #define H_BUTCH
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -173,14 +174,24 @@ struct Rule
   static constexpr rule_id NOT = -6;
   static constexpr rule_id PREPEEP = -7;
   static constexpr rule_id POSTPEEP = -8;
+  static constexpr rule_id SIDEFX_BEGIN = -9;
+  static constexpr rule_id SIDEFX_END = -10;
   
-  static constexpr rule_id STRING = -10;
-  static constexpr rule_id REGEX = -11;
-  static constexpr rule_id UNKNOWN_RULE = -12;
+  static constexpr rule_id STRING = -11;
+  static constexpr rule_id REGEX = -12;
+  static constexpr rule_id UNKNOWN_RULE = -13;
+
+  // associated class_id is undefined (using it is undefined behavior)
+  static constexpr rule_id SIDEFX_DEL = -20;
+  // associated class_id is the ctx_id of the context to use
+  static constexpr rule_id SIDEFX_CTX = -21;
+  // associated class_id is the new class_id to rename the unit with
+  static constexpr rule_id SIDEFX_TO = -21;
 
   static constexpr class_id ALIAS = -2;
   static constexpr class_id BEGIN = -3;
   static constexpr class_id END = -4;
+  
 
   static constexpr Match PARTIAL_FAILURE = {0, 0, true, 0, 0};
   static constexpr Match TOTAL_FAILURE = {0, 0, false, 0, 0};
@@ -291,15 +302,18 @@ constexpr ctx_id GLOBAL_CONTEXT = -1;
 struct Context
 {
   static constexpr uint32_t MAX_BE = 4;
+  static constexpr uint32_t MAX_DS = 2;
   uint32_t rulesets_start; // redunduncy in favor of data proximity
                         // (parser.rules[rules_start].rulset_start
                         // == .rulesets_start)
   uint32_t rules_start;
-  uint32_t rule_count;
   class_id name;
   rule_id begin[MAX_BE];
   rule_id end[MAX_BE];
-  uint8_t be_count; // begin & end count, must always be greater than 0
+  rule_id depth_stoppers[MAX_DS];
+  uint16_t rule_count;
+  uint8_t be_count;
+  uint8_t ds_count;
 };
 
 Own<char*> _butch_read_file(Ref<const char*> filename);
@@ -364,7 +378,7 @@ struct Parser
       REGEX_SYNTAX_ERROR,
       CONTEXT_MISSING_BEGIN,
       CONTEXT_MISSING_END,
-      CONTEXT_TOO_MANY_INHERITS
+      CONTEXT_SPECS_ERROR
     } type;
     union { uint32_t offset; Own<char*> name; };
   };

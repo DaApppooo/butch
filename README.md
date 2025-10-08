@@ -204,6 +204,7 @@ Statement = VarDecl StatementEnd
 To handle string-like elements within a context, butch has a type of rule called "depth-stoppers". These rules have the same properties as `Begin` and `End` rules, that is, they must be token-like and are matched with the equivalent of the `^` regex symbol. When these rules are matched, the context matcher skips the match to ensure no partial sub-context match within the depth-stopper. For example, if you've got this bit of butch code:
 
 ```
+! PARENTHESIS
 String = '".*?[^\\]"'
 = PARENTHESIS
   Begin = "("
@@ -211,7 +212,31 @@ String = '".*?[^\\]"'
   + String
 ```
 
-In this example, the piece of code `("(")` would detect a context begin/end mismatch. To handle 
+In this example, the piece of code `("(")` would detect a context begin/end mismatch. To handle such case, you can provide the name of a rule to serve as a "depth-stopper":
+
+```
+! PARENTHESIS
+String = '".*?[^\\]"'
+= PARENTHESIS ! String
+  Begin = "("
+  End = ")"
+  + String
+```
+
+If, for example, you don't want to match strings in any context, and just have them serve as context stoppers (why not ?), here's how you can achieve this:
+
+```
+! PARENTHESIS
+= PARENTHESIS ! String
+  Begin = "("
+  End = ")"
+= Useless
+  String = '".*?[^\\]"'
+```
+
+You'll note that contexts don't have to contain a begin and an end. In the [Side effects](#side-effects-todo) part you'll see another use for these context without `Begin/End`.
+
+> Depth-stoppers aren't copied within the context ! If you want them in there, you've got to manually copy them with the copy operator.
 
 ### Side effects [TODO]
 
@@ -226,7 +251,7 @@ Side effects provide a very basic way to add, check, verify contextual informati
 
 - `del` : Removes the unit, incompatible with every other non-conditional keyword. 
 - `ctx <context>` : Transforms the corresponding unit into a literal and checks every rule from `<context>`. Incompatible with every other non-conditional keyword.
-- `to <new_name>` : Gives a new name to the unit (creates the class accordingly if needed).
+- `to <new_name>` : Gives a new name to the unit (careates the class accordingly if needed).
 - *`check <expression>` : Additional check. Must be put before every other side effect. If `<expression>` is 0, the match success will be canceled.
 - *`if <expression>` : Sets the `cmp` flag to 1 if `<expression>` is non-zero. Sets it to 0 otherwise. By default the `cmp` flag is set to 1.
 - *`then <side effect>` : Check the `cmp` flag, and if enabled, executes `<side effect>`.
