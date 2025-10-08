@@ -1,25 +1,10 @@
 
 ! Parenthesis
-# ! Brackets
-# ! Braces
 String ='".*?[^\\]"'
 Name = '[a-z]+'
 
-= Parenthesis # Brackets Braces
+= Parenthesis ! ''
   Begin = "("
   End = ")"
-  + String
   ! Parenthesis
-  # ! Brackets
   + Name
-
-
-# = Brackets Parenthesis Braces
-#   Begin = "["
-#   End = "]"
-#   ! Parenthesis
-#   + Name
-
-# = Braces Parenthesis Brackets
-#   Begin = "{"
-#   End = "}"

@@ -435,11 +435,11 @@ GEN inline Self& list<T>::push(const T& element)
     }
     else
     {
-      _cap *= 2;
+      while (_cap < l) _cap += _cap/2+(_cap<3);
       _data = (T*)::realloc(_data, sizeof(T) * _cap);
     }
   }
-  memcpy(_data + (l - 1), &element, sizeof(T));
+  memcpy(_data + (l-1), &element, sizeof(T));
   _len = l;
   return self;
 }
@@ -535,7 +535,9 @@ GEN inline Self& list<T>::insert(T element, int index)
     self.push(element);
     return self;
   }
-  self.push(self[-1]);
+  const T temp = self[-1]; // references to self in a push
+                           // can cause illegal reads
+  self.push(temp);
   for (int i = len() - 2; i > index; i--)
   {
     self._data[i] = self._data[i - 1];
