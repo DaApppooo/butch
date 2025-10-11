@@ -9,7 +9,7 @@
 
 Butch doesn't really work with tokens and abstract syntax tree nodes (AST), but instead works with <u>units</u>. Units are both tokens (when they have no children\*) and AST nodes. A token kind of unit can be sub-parsed and become a AST node for example.
 
-<u>Rules</u> are functions that take a list of units as input, try to match them against their ruleset, and if there's a match, spits out a unit with the specified output class . Custom side effects can be added in case there's a match. Rules can contain classes, strings, regexes, aliases and symbols.
+<u>Rules</u> are functions that take a list of units as input, try to match them against their ruleset, and if there's a match, spits out a unit with the specified output class . Rules can contain classes, strings, regexes, aliases and symbols.
 
 <u>Classes</u> are the identifier for what a unit represents. You can see units as instances of classes.
 
@@ -17,7 +17,7 @@ Butch doesn't really work with tokens and abstract syntax tree nodes (AST), but 
 
 <u>Literal</u> is the default class that represents unparsed code (it cannot be accessed within butch code).
 
-<u>Contexts</u> are groups of rules that are only checked if the context is "pushed" (either by context push declaration or with a rule side effect). They're the one of the reasons Butch isn't a context-free parser (which is why they're named "contexts"). Typically, matching groups of braces together is done with contexts.
+<u>Contexts</u> are groups of rules that are only checked if the context is "pushed" (either by context push declaration or with a context re-parsing). They're the one of the reasons Butch isn't a context-free parser (which is why they're named "contexts"). Typically, matching groups of braces together is done with contexts.
 
 ### How it works
 
@@ -67,8 +67,8 @@ Here is a table of all of the current butch symbols and what they mean:
 | `+` | Match at least once the previous class, string, regex, alias or grouping. |
 | `[` | "Prepreep": everything that's before won't be included as children of the output unit. |
 | `]` | "Postpeep": everything that's after won't be included as children of the output unit. |
-| `{` | Side effects declaration begin (cannot be recursed) |
-| `}` | Side effects declaration end |
+| `{` | Contextual re-parsing (CrP) begin  |
+| `}` | CrP end |
 
 ### Rules
 Rules look like this:
@@ -234,36 +234,28 @@ If, for example, you don't want to match strings in any context, and just have t
   String = '".*?[^\\]"'
 ```
 
-You'll note that contexts don't have to contain a begin and an end. In the [Side effects](#side-effects-todo) part you'll see another use for these context without `Begin/End`.
+You'll note that contexts don't have to contain a begin and an end. In the [CrP](#contextual-re-parsing-crp) part you'll see another use for these context without `Begin/End`.
 
 > Depth-stoppers aren't copied within the context ! If you want them in there, you've got to manually copy them with the copy operator.
 
-### Side effects [TODO]
+### Contextual re-parsing (CrP) [TODO]
 
-When declaring a rule, you might want to add some side effects to the output if the rule successfuly matched. This can be achieved with curly braces put on the right of the ruleset element you want to add side effects to. For example, if you want to remove a unit once the rule is matched, you can use the `del` keyword:
+Sometimes, contexts aren't only defined by their begin and their end. Often in contextual parsing you'll need to check for surrounding tokens/nodes to then run a special parsing of some code. In butch, this is achieved with CrP. CrP contexts don't necessarily have a begin/end pair (although they technically can, but these two rules will be skipped when doing the CrP). Once a rule matched, each element of the matched that has a CrP specification will be transformed back into a literal, its children will be removed, and all of the rules of the context will be checked just like with a regular context.
+
+Here's an example of how and when you could use CrP:
+
 ```
-StatementEnd = ";"
-Int = '[0-9]+'
-Statement = Int StatementEnd{del}
+! PARENTHESIS
+Name = '[a-zA-Z_]+'
+FuncDecl = Name Name PARENTHESIS{FUNC_DECL_ARGS}
+= PARENTHESIS
+  Begin = "("
+  End = ")"
+= FUNC_DECL_ARGS
+  + Name
+  Sep = ","
+  ArgDecl = Name Name
 ```
-
-Side effects provide a very basic way to add, check, verify contextual information, and optimize the output of the parser. Here is the list of keywords and syntaxes you can use, separating each by a comma:
-
-- `del` : Removes the unit, incompatible with every other non-conditional keyword. 
-- `ctx <context>` : Transforms the corresponding unit into a literal and checks every rule from `<context>`. Incompatible with every other non-conditional keyword.
-- `to <new_name>` : Gives a new name to the unit (careates the class accordingly if needed).
-- *`check <expression>` : Additional check. Must be put before every other side effect. If `<expression>` is 0, the match success will be canceled.
-- *`if <expression>` : Sets the `cmp` flag to 1 if `<expression>` is non-zero. Sets it to 0 otherwise. By default the `cmp` flag is set to 1.
-- *`then <side effect>` : Check the `cmp` flag, and if enabled, executes `<side effect>`.
-- *`else <side effect>` : Check the `cmp` flag, and if disabled, executes `<side effect>`.
-- *`call <symbol>` : Tries to find symbol `<symbol>`. On failure, will end parsing (unless `FLAG_IGNORE_MISSING_SYMBOLS` is on in the parser flags, in which case side effects will be ignored). On success, will call the symbol with a reference/pointer to the current parser, rule, and unit as arguments (in this order), expecting a boolean return value. The return value indicate failure of operation (false on success, true otherwise). If the return value happens to be true, the unit will have a valid `symbol` attribute set to the address of the found symbol, and its id will be set to `Unit::CALL_FAILURE`.
-- *`try <symbol>` : Same as call, except that the `cmp` flag is set to the boolean inverse of the return value, and the id of the unit isn't set to `Unit::CALL_FAILURE` (although failure to find the symbol will result in end of parsing, or side effects skipping).
-- **`istore <expression>` : Evaluates `<expression>` as a signed 64bit integer, and stores it into the `data` attribute of the unit.
-- **`ustore <expression>` : Evaluates `<expression>` as an unsigned integer, and stores it into the `data` attribute of the unit.
-- **`pstore <expression>` : Evaluates `<expression>` as an owned pointer (assumed to be allocated with `malloc/calloc/realloc`), and stores it into the `data` attribute of the unit (when the unit is destroyed, the pointer is freed with C's `free`).
-- **`rstore <expression>` : Evaluates `<expression>` as a referenced pointer, and stores it into the `data` attribute of the unit (when the unit is destroyed, the pointer isn't freed).
-
-> Side effects annoted with * might never be implemented, and ** have an even higher chance of never being implemented. Both will be removed from the documentation in such case.
 
 ## The interface
 
