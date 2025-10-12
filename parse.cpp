@@ -292,6 +292,27 @@ void Rule::_apply_context(
   }
 }
 
+Match _butch_find_first_depth_stopper(
+  Parser& p,
+  Pack<Unit>& units,
+  list<Rule::Pt>& u,
+  const Context& ctx
+) {
+  Match ds_m, sub_m;
+  ds_m.matched = false;
+  for (u8 i = 0; i < ctx.ds_count; i++)
+  {
+    sub_m = p.rules[ctx.depth_stoppers[i]]._sequence_match(p, units, u);
+    if (!sub_m.matched)
+      continue;
+    if (!ds_m.matched)
+      ds_m = sub_m;
+    else if (sub_m.s_start < ds_m.s_start)
+      ds_m = sub_m;
+  }
+  return ds_m;
+}
+
 Match Rule::_match_context(
   Parser& p,
   Pack<Unit>& units,
@@ -306,7 +327,7 @@ Match Rule::_match_context(
   
   const Context& ctx = p.ctxs[get_context()];
   Pack<Unit>::State state;
-  Match m, sub_m;
+  Match m, sub_m, ds_m;
   list<u8> depth; // indicies in the ctx.begin and ctx.end
   u32 ctx_content_len, abs_index;
   assert(units[0].id == Unit::LITERAL);
@@ -316,14 +337,26 @@ Match Rule::_match_context(
   const u32 units_s_start = units[0].s_start;
   const u32 units_s_end = units_s_start + units[0].s_len;
   depth.init();
-  m = p.rules[ctx.begin[0]]._sequence_match(p, units, u);
-  if (!m.matched)
+  do
   {
-    units.reset(state);
-    return TOTAL_FAILURE;
-  }
+    m = p.rules[ctx.begin[0]]._sequence_match(p, units, u);
+    if (!m.matched)
+    {
+      units.reset(state);
+      return TOTAL_FAILURE;
+    }
+    const u32 temp = units[0].s_start;
+    do
+    {
+      ds_m = _butch_find_first_depth_stopper(p, units, u, ctx);
+    } while (ds_m.s_end() < m.s_start);
+    if (ds_m.matched && m.in(ds_m))
+      units[0].s_start = ds_m.s_end();
+    if ((ds_m.matched && !m.in(ds_m)) || !ds_m.matched)
+      break;
+  } while (true);
   units[0].s_len = m.s_start - units[0].s_start + 1;
-  for (int i = 1; i < ctx.be_count; i++)
+  for (u8 i = 1; i < ctx.be_count; i++)
   {
     sub_m = p.rules[ctx.begin[i]]._sequence_match(p, units, u);
     if (sub_m.matched && sub_m.s_start < m.s_start)

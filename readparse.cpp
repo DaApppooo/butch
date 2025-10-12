@@ -110,7 +110,7 @@ int main(int argc, const char** argv)
         );
         free(res.err.name);
         break;
-      case Parser::Error::CONTEXT_TOO_MANY_INHERITS:
+      case Parser::Error::CONTEXT_SPECS_ERROR:
         fprintf(stderr,
           "The context '%s' inherits begin and end from too many other"
           " contexts.\n",

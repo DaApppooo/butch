@@ -155,6 +155,10 @@ struct Match
       true
     });
   }
+  bool in(Match other)
+  {
+    return s_start >= other.s_start && s_end() <= other.s_end();
+  }
   bool operator == (Match o)
   { return o.matched == matched
            && o.s_start == s_start

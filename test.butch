@@ -3,8 +3,8 @@
 String ='".*?[^\\]"'
 Name = '[a-z]+'
 
-= Parenthesis ! ''
+= Parenthesis ! String
   Begin = "("
   End = ")"
   ! Parenthesis
-  + Name
+  + String Name

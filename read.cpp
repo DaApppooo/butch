@@ -1,6 +1,7 @@
 #include "butch.hpp"
 #include "stuff.hpp"
 #include <cctype>
+#include <cstdio>
 #include <regex>
 
 #define assume(X) do { assert(X); [[assume(X)]]; } while(false)
@@ -557,14 +558,15 @@ void Parser::debug(FILE* f)
     {
       const Context& ctx = ctxs[ctid];
       c = classes[ctx.name].fix();
-      fprintf(f,
-        "= %s (%04i, %04i)\n",
-        classes[ctx.name].start,
-        ctx.begin[0],
-        ctx.end[0]
-      );
+      fprintf(f, "= %s", classes[ctx.name].start);
       classes[ctx.name].mov(c);
       k_end = k + ctx.rule_count;
+      for (u8 i = 0; i < ctx.be_count; i++)
+        fprintf(f, " (%04i, %04i)", ctx.begin[i], ctx.end[i]);
+      fprintf(f, " !");
+      for (u8 i = 0; i < ctx.ds_count; i++)
+        fprintf(f, " (%04i)", ctx.depth_stoppers[i]);
+      fprintf(f, "\n");
     }
     for (; k < k_end; k++)
     {
