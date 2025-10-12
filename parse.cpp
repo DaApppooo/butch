@@ -349,9 +349,12 @@ Match Rule::_match_context(
     do
     {
       ds_m = _butch_find_first_depth_stopper(p, units, u, ctx);
-    } while (ds_m.s_end() < m.s_start);
+    } while (ds_m.matched && ds_m.s_end() < m.s_start);
     if (ds_m.matched && m.in(ds_m))
+    {
+      units[0].s_len -= ds_m.s_end() - units[0].s_start;
       units[0].s_start = ds_m.s_end();
+    }
     if ((ds_m.matched && !m.in(ds_m)) || !ds_m.matched)
       break;
   } while (true);
@@ -371,8 +374,26 @@ Match Rule::_match_context(
   units[0].s_start = m.s_start;
   units[0].s_start += m.s_len;
   units[0].s_len = units_s_end - units[0].s_start;
+  ds_m.matched = false;
   while (depth.len() > 0)
   {
+    const u32 len = units[0].s_len;
+    do // units[0].s_len stores the minimum length between units[0].s_start and
+    { // the next depth stopper
+      if (!ds_m.matched || units[0].s_start > ds_m.s_start)
+        ds_m = _butch_find_first_depth_stopper(p, units, u, ctx);
+      if (ds_m.matched && ds_m.s_start == units[0].s_start)
+      {
+        units[0].s_start += ds_m.s_len;
+        units[0].s_len -= ds_m.s_len;
+      }
+      else
+      {
+        units[0].s_len = ds_m.s_start - units[0].s_start;
+        break;
+      }
+    } while (true);
+    sub_m.matched = false;
     for (u8 i : range(ctx.be_count))
     {
       sub_m = p.rules[ctx.end[i]]._sequence_match(p, units, u);
@@ -385,22 +406,25 @@ Match Rule::_match_context(
           goto FAILURE;
         }
         depth.pop();
-        units[0].s_start += sub_m.s_len-1;
-        units[0].s_len -= sub_m.s_len-1;
+        units[0].s_start += sub_m.s_len;
+        units[0].s_len = len - sub_m.s_len;
         break;
       }
       sub_m = p.rules[ctx.begin[i]]._sequence_match(p, units, u);
       if (sub_m.matched)
       {
         depth.push(i);
-        units[0].s_start += sub_m.s_len-1;
-        units[0].s_len -= sub_m.s_len-1;
+        units[0].s_start += sub_m.s_len;
+        units[0].s_len = len - sub_m.s_len;
         break;
       }
     }
-    units[0].s_start++;
-    units[0].s_len--;
-    if (units[0].s_start >= units_s_end && depth.len() > 0)
+    if (!sub_m.matched)
+    {
+      units[0].s_start++;
+      units[0].s_len = len-1;
+    }
+    if (units[0].s_len <= 0 && depth.len() > 0)
     {
       m = BUTCH_FAIL;
       goto FAILURE;
@@ -625,6 +649,7 @@ bool Parser::_check_and_do_rule(
   assert(!(flags & _FLAG_START_FIXED_MATCH)); // TEMP
 
   if (r.is_context())
+  {
     for (u32 i : out.dyn_range().iter_with(dyn_out_iter))
     {
       if (out[i].id == Unit::LITERAL)
@@ -639,6 +664,7 @@ bool Parser::_check_and_do_rule(
         out.reset(state);
       }
     }
+  }
   else if (r.is_alias())
     return false; // this is an alias
   else if (r.is_token())
