@@ -39,7 +39,7 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
         r.out == Rule::BEGIN || r.out == Rule::END
         ? View((char*)"^", 1) : View<char>(nullptr, nullptr);
       const char* const cstr_patt = _load_str(pattern, surround, start);
-      regex_patterns.push(RegexPatt());
+      regex_patterns.push_ref(RegexPatt());
       try
       {
         regex_patterns[-1] = RegexPatt(cstr_patt);
@@ -268,7 +268,8 @@ class_id _butch_copy_object(
         return cid;
       if (!self.rules[rid].is_alias())
       {
-        self.rules.push(self.rules[rid]);
+        const Rule r = self.rules[rid];
+        self.rules.push(r);
         self.ctxs[cctx].rule_count++;
       }
     }

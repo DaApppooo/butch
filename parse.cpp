@@ -205,9 +205,9 @@ void _butch_split_token(
   const u32 post_start = match.s_start+match.s_len;
   out[0].s_len = pre_len;
   out.insert(Unit(rule_idx, match.s_start, match.s_len, 0), 1);
-  if (post_len > 0 && !p._is_to_be_trimmed(post_start, post_len))
+  if (!p._should_be_trimmed(post_start, post_len))
     out.insert(Unit(Unit::LITERAL, post_start, post_len, 0), 2);
-  if (pre_len == 0 || p._is_to_be_trimmed(out[0].s_start, pre_len))
+  if (p._should_be_trimmed(out[0].s_start, pre_len))
     out.rmv(0); // TODO : optimize this rmv out
 }
 
@@ -235,7 +235,7 @@ void Rule::_apply_context(
   const u16 begin_len = m.u_start;
   const u16 end_len = m.u_end;
   const i32 head_len = i32(m.s_start) - units_s_start - begin_len;
-  if (head_len > 0 && !p._is_to_be_trimmed(units_s_start, head_len))
+  if (!p._should_be_trimmed(units_s_start, head_len))
   {
     assert(m.s_start - units_s_start - begin_len > 0);
     units.insert(Unit(
@@ -281,7 +281,7 @@ void Rule::_apply_context(
   const i32 total_end = units_s_start+units_s_len;
   const i32 ctx_end = m.s_start+m.s_len+m.u_end;
   const i32 tail_len = total_end - ctx_end;
-  if (tail_len > 0 && !p._is_to_be_trimmed(ctx_end, tail_len))
+  if (!p._should_be_trimmed(ctx_end, tail_len))
   {
     units.insert(Unit(
       Unit::LITERAL,
@@ -342,8 +342,8 @@ Match Rule::_match_context(
     m = p.rules[ctx.begin[0]]._sequence_match(p, units, u);
     if (!m.matched)
     {
-      units.reset(state);
-      return TOTAL_FAILURE;
+      m = TOTAL_FAILURE;
+      goto FAILURE;
     }
     const u32 temp = units[0].s_start;
     do
@@ -364,8 +364,8 @@ Match Rule::_match_context(
     sub_m = p.rules[ctx.begin[i]]._sequence_match(p, units, u);
     if (sub_m.matched && sub_m.s_start < m.s_start)
     {
-      units[0].s_len = units_s_end - units_s_start;
-      return TOTAL_FAILURE;
+      m = TOTAL_FAILURE;
+      goto FAILURE;
     }
   }
   // we temporarily enable _FLAG_START_FIXED_MATCH
@@ -444,6 +444,7 @@ Match Rule::_match_context(
   depth.destroy();
   return m;
 FAILURE:
+  assert(!m.matched);
   units[0].s_start = units_s_start;
   units[0].s_len = units_s_end - units_s_start;
   units.reset(state);
@@ -606,8 +607,10 @@ Match Rule::_sequence_match(
 #undef FAIL
 }
 
-bool Parser::_is_to_be_trimmed(uint32_t begin, uint32_t len)
+bool Parser::_should_be_trimmed(uint32_t begin, uint32_t len)
 {
+  if (len == 0)
+    return true;
   if (!(flags & FLAG_TRIM_SPACE_LITERALS))
     return false;
   for (uint32_t i = 0; i < len; i++)
@@ -641,10 +644,10 @@ bool Parser::_check_and_do_rule(
   auto dyn_out_rev_iter = [&out](DynDirRange<u32>& i){ _butch_prev(out, i); };
   Pack<Unit>::State state;
 
-  // char c = classes[r.out].fix();
-  // printf(">>>> %s <<<<\n", classes[r.out].start);
-  // classes[r.out].mov(c);
-  // debug_output(stdout, out.to_view());
+  char c = classes[r.out].fix();
+  printf(">>>> %s <<<<\n", classes[r.out].start);
+  classes[r.out].mov(c);
+  debug_output(stdout, out.to_view());
 
   assert(!(flags & _FLAG_START_FIXED_MATCH)); // TEMP
 
@@ -753,6 +756,9 @@ list<Unit> Parser::parse(Ref<char*> s)
   out.init();
   pt_buffer.init();
   parsed_code = {s, (u32)str_len(s)};
+
+  if (_should_be_trimmed(0, parsed_code.len))
+    return out.ls();
 
   out.push(Unit(Unit::LITERAL, 0, str_len(s), 0));
 

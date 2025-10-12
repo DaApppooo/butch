@@ -1,7 +1,7 @@
 
 # Butch
 
-> A heavy lexer+parser.
+Butch is a heavy lexer+parser that's only limited by python-like syntaxes. The idea is that you 
 
 ## Concepts
 
@@ -113,7 +113,7 @@ Aliases aren't classes in the sense that a unit cannot have an alias as its clas
 
 > Note that aliases with only one element are "true aliases" in the sense that they're only a renaming of the element.
 
-### Contexts [TODO]
+### Contexts
 
 Contexts are what enables depth awareness with parenthesis, braces, brackets, strings, etc... Contexts are collections of rules. There's the global context (which is the one selected for every rule by default). A context begins and ends with rules called `Begin` and `End`:
 ```
@@ -344,4 +344,4 @@ Finally, to actually use your parser,
     - As the output class of a rule: it references the rule itself.
     - In a ruleset: if it exists, the context push with this name in the current context, and if not a rule whose output class has this name.
     - In a copy (with the `+` operator at the start of a line: )
-
+3. Regexes use the modified ECMAScript regex grammar. For now the C++ implementation is used, but for (de)serialization reasons, a custom regex engine must be written (for now, deserialization requires the re-compilation of regexes, which is what takes the longest time).

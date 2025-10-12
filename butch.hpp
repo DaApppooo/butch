@@ -461,12 +461,14 @@ struct Parser
   // same as _load but transforms "\\n" into "\n"
   const char* _comp_str(View<char> s);
   View<char> _rgx_match(View<char> big, const RegexPatt& pattern);
-  bool _is_to_be_trimmed(uint32_t begin, uint32_t len);
+  bool _should_be_trimmed(uint32_t begin, uint32_t len);
   RulePack operator [] (int index)
   { return {classes[index], rules[index]}; }
-  constexpr inline
-  bool is_rule(const Rule& r, int index, std::initializer_list<rule_id> tests)
-  {
+  constexpr inline bool is_rule(
+    const Rule& r,
+    int index,
+    std::initializer_list<rule_id> tests
+  ) {
     for (rule_id t : tests)
       if (in_rule(r, index) == t)
         return true;
