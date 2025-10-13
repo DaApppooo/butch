@@ -35,10 +35,10 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
       const View<char> surround =
         flags & FLAG_ISOLATED_MODE_REGEX
         ? View((char*)"\\b", 3) : View<char>(nullptr, nullptr);
-      const View<char> start =
+      const View<char> ld_start =
         r.out == Rule::BEGIN || r.out == Rule::END
         ? View((char*)"^", 1) : View<char>(nullptr, nullptr);
-      const char* const cstr_patt = _load_str(pattern, surround, start);
+      const char* const cstr_patt = _load_str(pattern, surround, ld_start);
       regex_patterns.push_ref(RegexPatt());
       try
       {
@@ -50,7 +50,7 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
          r.out = classes.len()-1;
          return Error::REGEX_SYNTAX_ERROR;
       }
-      const View<char> v = View<char>(nullptr, regex_patterns.len()-1);
+      const View<char> v = View<char>(start, regex_patterns.len()-1);
       classes.push(v);
       _push_rc(Rule::REGEX, classes.len()-1);
     }

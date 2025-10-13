@@ -1,6 +1,5 @@
 #ifndef H_BUTCH
 #define H_BUTCH
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -427,6 +426,15 @@ struct Parser
     Ref<const char*> filename
   )
   { return Parser::read(_butch_read_file(filename)); }
+
+  size_t serialize_file(FILE*);
+  Own<char*> serialize(size_t*);
+  size_t serialize(size_t(*)(const void*, size_t, void*), void*);
+
+  size_t deserialize_file(FILE*);
+  size_t deserialize(char*, size_t);
+  size_t deserialize(size_t(*)(void*, size_t, void*), void*);
+
   void debug(FILE* f);
   void debug_output(FILE* f, const View<Unit> ls);
   Own<list<Unit>> parse(Ref<char*> s);
