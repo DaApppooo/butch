@@ -86,6 +86,7 @@ struct Unit
   rule_id id; // points to Parser.rules
               // if id == LITERAL then this is unparsed code
   uint32_t s_len;
+  ctx_id reparse_ctx;
   uint16_t children_len;
   int16_t ctx; // >= 0 only if id == -1
   inline uint32_t s_end() const { return s_start + s_len; }
@@ -177,19 +178,12 @@ struct Rule
   static constexpr rule_id NOT = -6;
   static constexpr rule_id PREPEEP = -7;
   static constexpr rule_id POSTPEEP = -8;
-  static constexpr rule_id SIDEFX_BEGIN = -9;
-  static constexpr rule_id SIDEFX_END = -10;
+  static constexpr rule_id REPARSE = -9;
   
-  static constexpr rule_id STRING = -11;
-  static constexpr rule_id REGEX = -12;
-  static constexpr rule_id UNKNOWN_RULE = -13;
-
-  // associated class_id is undefined (using it is undefined behavior)
-  static constexpr rule_id SIDEFX_DEL = -20;
-  // associated class_id is the ctx_id of the context to use
-  static constexpr rule_id SIDEFX_CTX = -21;
-  // associated class_id is the new class_id to rename the unit with
-  static constexpr rule_id SIDEFX_TO = -21;
+  static constexpr rule_id STRING = -10;
+  static constexpr rule_id REGEX = -11;
+  static constexpr rule_id UNKNOWN_RULE = -12;
+  static constexpr rule_id UNKNOWN_REPARSE = -13;
 
   static constexpr class_id ALIAS = -2;
   static constexpr class_id BEGIN = -3;
@@ -201,10 +195,6 @@ struct Rule
   uint32_t ruleset_start;
   uint32_t input_len;
   class_id out;
-  // bool is_token : 1;
-  // bool is_alias : 1;
-  // bool has_prepeep : 1;
-  // bool has_postpeep : 1;
   uint32_t _flags;
   static Rule init()
   {
@@ -379,6 +369,7 @@ struct Parser
       ALIAS_SYNTAX_ERROR,
       RULE_SYNTAX_ERROR,
       REGEX_SYNTAX_ERROR,
+      REPARSE_SYNTAX_ERROR,
       CONTEXT_MISSING_BEGIN,
       CONTEXT_MISSING_END,
       CONTEXT_SPECS_ERROR

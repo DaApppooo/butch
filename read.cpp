@@ -68,6 +68,22 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
         PUSH_SYM('+', Rule::PLUS);
         PUSH_SYM('|', Rule::PIPE);
         PUSH_SYM('!', Rule::NOT);
+        case '{':
+        {
+          s++; // skip '{'
+          start = s;
+          while (*s != 0 && *s != '}' && *s != '#')
+            s++;
+          if (*s == 0 || *s == '#')
+            return Error::REPARSE_SYNTAX_ERROR;
+          const class_id cid = _find_or_make_class(View<char>(start, s));
+          const ctx_id ctid = _find_ctx(cid);
+          if (ctid == GLOBAL_CONTEXT)
+            _push_rc(Rule::UNKNOWN_REPARSE, cid);
+          else
+            _push_rc(Rule::REPARSE, ctid);
+          s++; // skip '}'
+        }
         case '[':
           if (r.is_alias())
             return Error::ALIAS_SYNTAX_ERROR;
@@ -85,6 +101,7 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
           r.has_postpeep(true);
           _push_rc(Rule::POSTPEEP, 0); s++; break;
         default:
+        {
           start = s;
           while (!isspace(*s) && *s != '\n')
             s++;
@@ -92,6 +109,7 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
           const rule_id rid = _find_rule(cid);
           _push_rc(rid, cid);
           break;
+        }
       }
     }
     SKIP_SPACES_ONLY;
@@ -468,6 +486,17 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
         else
           rids[j] = find_test;
       }
+      else if (rids[j] == Rule::UNKNOWN_REPARSE)
+      {
+        const ctx_id find_test = self._find_ctx(cids[j]);
+        if (find_test == Rule::UNKNOWN_RULE)
+        { ERROR_CN(Error::UNDECLARED_CONTEXT, cids[j]) }
+        else
+        {
+          cids[j] = find_test;
+          rids[j] = Rule::REPARSE;
+        }
+      }
       if (j > 0 && rids[j-1] == Rule::NOT && rids[j] < 0)
         ERROR_CN(Error::MISPLACED_NOT, cids[j]);
       if (!self.is_rule(r, j, {Rule::STRING, Rule::REGEX, Rule::PIPE}))
@@ -496,10 +525,10 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       const Context& src = self.ctxs[ctid];
       const rule_id brid = src.begin[0];
       const rule_id erid = src.end[0];
-      if (brid == Rule::UNKNOWN_RULE)
-        ERROR_CN(Error::CONTEXT_MISSING_BEGIN, src.name);
-      if (erid == Rule::UNKNOWN_RULE)
-        ERROR_CN(Error::CONTEXT_MISSING_END, src.name);
+      // if (brid == Rule::UNKNOWN_RULE)
+      //   ERROR_CN(Error::CONTEXT_MISSING_BEGIN, src.name);
+      // if (erid == Rule::UNKNOWN_RULE)
+      //   ERROR_CN(Error::CONTEXT_MISSING_END, src.name);
       self.ctxs[i].begin[j] = brid;
       self.ctxs[i].end[j] = erid;
     }

@@ -496,6 +496,7 @@ Match Rule::_sequence_match(
       //   u[-1].r,
     //   u[-1].u
     // );
+
     if (not_flag)
       not_flag = false;
     switch (*RPTR(-1))
@@ -563,6 +564,9 @@ Match Rule::_sequence_match(
           u[-1].r++;
           break;
         }
+      case REPARSE:
+        assert(false);
+        break;
       case STRING:
         if (ret.include(_match_str(p, units.to_view(), u, *CPTR(-1))))
           return failure;

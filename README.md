@@ -155,6 +155,8 @@ Depth awareness can also mix multiple context begins and ends for a single conte
   End = "]"
 ```
 
+The issue with this example is that depth awareness will take into account braces and brackets within parenthesis, but that these won't actually be matched. If you and to match braces and brackets within parenthesis (and not just to avoid matching for example `()`)
+
 Sometimes it can be useful to include rules of other contexts within the current context without having to rewrite it. Here's an example of how to do that:
 
 ```
@@ -345,3 +347,4 @@ Finally, to actually use your parser,
     - In a ruleset: if it exists, the context push with this name in the current context, and if not a rule whose output class has this name.
     - In a copy (with the `+` operator at the start of a line: )
 3. Regexes use the modified ECMAScript regex grammar. For now the C++ implementation is used, but for (de)serialization reasons, a custom regex engine must be written (for now, deserialization requires the re-compilation of regexes, which is what takes the longest time).
+4. You cannot negate a grouping. You can only negate (with `!`) a class.
