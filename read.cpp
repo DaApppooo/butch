@@ -83,6 +83,7 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
           else
             _push_rc(Rule::REPARSE, ctid);
           s++; // skip '}'
+          break;
         }
         case '[':
           if (r.is_alias())
@@ -103,7 +104,7 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
         default:
         {
           start = s;
-          while (!isspace(*s) && *s != '\n')
+          while (isalnum(*s))
             s++;
           const class_id cid = _find_or_make_class(View(start, s));
           const rule_id rid = _find_rule(cid);
@@ -508,12 +509,6 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   // Resolve contexts
   for (uint32_t i = 0; i < self.ctxs.len(); i++)
   {
-    if (self.ctxs[i].begin[0] == Rule::UNKNOWN_RULE)
-    {
-      ERROR_CN(Error::CONTEXT_MISSING_BEGIN, self.ctxs[i].name);
-    }
-    if (self.ctxs[i].end[0] == Rule::UNKNOWN_RULE)
-      ERROR_CN(Error::CONTEXT_MISSING_END, self.ctxs[i].name);
     for (uint8_t j = 1; j < self.ctxs[i].be_count; j++)
     {
       if (self.ctxs[i].begin[j] != Rule::UNKNOWN_RULE)
@@ -642,6 +637,11 @@ void Parser::debug(FILE* f)
           fprintf(f, "%s", p);
         } else if (in_rule(r, i) == Rule::REGEX) {
           fprintf(f, " <compiled regex>"); 
+        } else if (in_rule(r, i) == Rule::REPARSE) {
+          const View<char>& v = classes[ctxs[in_class(r, i)].name];
+          c = v.fix();
+          fprintf(f, " {%s}", v.start); 
+          v.mov(c);
         } else {
           c = classes[in_class(r, i)].fix();
           fprintf(f, " %s", classes[in_class(r, i)].start);

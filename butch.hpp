@@ -79,7 +79,8 @@ struct Parser;
 struct Unit
 {
   static constexpr rule_id LITERAL = -1; // for Unit.id
-  static constexpr rule_id ERROR_CONTEXT_MISMATCH = -2;
+  static constexpr ctx_id ERROR_CONTEXT_MISMATCH = -2;
+  static constexpr ctx_id NO_REPARSE = -1;
   uint32_t s_start;
   // number of children units following this unit in the output unit vector
   // representing a tree
@@ -88,25 +89,26 @@ struct Unit
   uint32_t s_len;
   ctx_id reparse_ctx;
   uint16_t children_len;
-  int16_t ctx; // >= 0 only if id == -1
   inline uint32_t s_end() const { return s_start + s_len; }
   
   Unit() {}
   Unit(class_id id, uint32_t begin, uint32_t len, uint32_t children_count)
     : s_start(begin), id(id), s_len(len), children_len(children_count),
-      ctx(-1) {}
+      reparse_ctx(NO_REPARSE) {}
   Unit(const Unit& u)
     : s_start(u.s_start), id(u.id), s_len(u.s_len),
-      children_len(u.children_len), ctx(u.ctx) {}
+      children_len(u.children_len), reparse_ctx(NO_REPARSE) {}
   Unit(const Unit&& u)
     : s_start(u.s_start), id(u.id), s_len(u.s_len),
-      children_len(u.children_len), ctx(u.ctx) {}
+      children_len(u.children_len), reparse_ctx(NO_REPARSE) {}
   constexpr Unit& operator = (const Unit& u)
   { s_start=u.s_start; id=u.id; s_len=u.s_len;
-    children_len=u.children_len; ctx = u.ctx; return *this; }
+    children_len=u.children_len;
+    reparse_ctx = u.reparse_ctx; return *this; }
   constexpr Unit& operator = (const Unit&& u)
   { s_start=u.s_start; id=u.id; s_len=u.s_len;
-    children_len=u.children_len; ctx = u.ctx; return *this; }
+    children_len=u.children_len;
+    reparse_ctx = u.reparse_ctx; return *this; }
 
   View<char> str(const Parser&);
   bool is(const Parser&, const View<char> s);
@@ -178,12 +180,12 @@ struct Rule
   static constexpr rule_id NOT = -6;
   static constexpr rule_id PREPEEP = -7;
   static constexpr rule_id POSTPEEP = -8;
-  static constexpr rule_id REPARSE = -9;
   
   static constexpr rule_id STRING = -10;
   static constexpr rule_id REGEX = -11;
   static constexpr rule_id UNKNOWN_RULE = -12;
   static constexpr rule_id UNKNOWN_REPARSE = -13;
+  static constexpr rule_id REPARSE = -14;
 
   static constexpr class_id ALIAS = -2;
   static constexpr class_id BEGIN = -3;

@@ -104,6 +104,22 @@ int main(int argc, const char** argv)
         );
         free(res.err.name);
         break;
+      case Parser::Error::CONTEXT_MISSING_BEGIN:
+        fprintf(stderr,
+          "The context '%s' inherits a begin from someone who doesn't have one"
+          ".\n",
+          res.err.name
+        );
+        free(res.err.name);
+        break;
+      case Parser::Error::CONTEXT_MISSING_END:
+        fprintf(stderr,
+          "The context '%s' inherits an end from someone who doesn't have one."
+          "\n",
+          res.err.name
+        );
+        free(res.err.name);
+        break;
       case Parser::Error::MISPLACED_COPY:
         fprintf(stderr,
           "Misplaced copy operator (+ at %u): you can only copy rules "

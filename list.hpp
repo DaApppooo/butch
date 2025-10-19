@@ -231,7 +231,7 @@ public:
   inline View<T> to_view() const;
   inline Pack<T> to_pack() const;
   inline View<T> slice(int start, int len) const;
-  Self& rmv_range(std::initializer_list<int> start_end);
+  Self& rmv(int start, int end);
   inline Self& clear();
   inline Self& swap(int idx_a, int idx_b);
   inline Self& ref(const View<T>& other);
@@ -318,6 +318,12 @@ struct Pack
   { start = s.s; len = s.l+(_data.len()-s.il); }
   Self& rmv(int i)
   { _data.rmv(start+i); len--; return *this; }
+  Self& rmv(int s, int e)
+  {
+    _data.rmv(s, e);
+    len -= e - s;
+    return *this;
+  }
   list<T>& ls() const { return _data; }
   list<T>& ls() { return _data; }
   constexpr inline DynDirRange<decltype(len)> dyn_range() const
@@ -562,11 +568,10 @@ GEN inline Self& list<T>::rmv(int index)
   return self;
 }
 
-GEN Self& list<T>::rmv_range(std::initializer_list<int> start_end)
+GEN Self& list<T>::rmv(int start, int end)
 {
+  if (start == end) return *this;
   uint32_t l = len();
-  int start = *start_end.begin();
-  int end = *(start_end.begin() + 1);
   assert(start < end);
   if constexpr (has_destroyer)
   {

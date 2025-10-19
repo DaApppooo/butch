@@ -94,10 +94,12 @@ inline void _next(u32& i, View<Unit> units)
 { i += units[i].children_len+1; }
 
 Match _butch_failure(
-  list<Rule::Pt>& u,
   rule_id* in,
+  View<Unit> units,
+  list<Rule::Pt>& u,
   int rule_len
 ) {
+  const u32 old_u = u.atn(-1).u;
   int m = -1, depth;
   while (m < 0)
   {
@@ -132,12 +134,19 @@ Match _butch_failure(
       u[-1].u = u[-2].u;
     }
   }
+  // deactivate any reparsing
+  for (u32 i = u.atn(-1).u; i < old_u; _next(i, units))
+    units[i].reparse_ctx = Unit::NO_REPARSE;
   return Rule::PARTIAL_FAILURE;
 }
+
+inline View<Unit> to_view(View<Unit> v) { return v; }
+inline View<Unit> to_view(Pack<Unit>& v) { return v.to_view(); }
 #define BUTCH_FAIL \
   _butch_failure( \
-      u, \
       p.rulesets_rules.data()+ruleset_start, \
+      to_view(units), \
+      u, \
       input_len \
     )
 
@@ -153,7 +162,7 @@ Match Rule::_match_str(
   | (bool(p.flags & Parser::_FLAG_START_FIXED_MATCH) << 1);
   const View<char> big = units[u[-1].u].str(p);
   const View<char> patt = p.classes[cid].shorten(1,1);
-  if (units[u[-1].u].ctx != -1)
+  if (units[u[-1].u].reparse_ctx != Unit::NO_REPARSE)
     return BUTCH_FAIL;
   if ((s = _butch_str_match(big, patt, iso_mode)).start)
   {
@@ -177,8 +186,7 @@ Match Rule::_match_rgx(
   View<char> s;
   const View<char> big = units[u[-1].u].str(p);
   const View<char> patt = p.classes[cid];
-  expect(patt.start == nullptr);
-  if (units[u[-1].u].ctx != -1)
+  if (units[u[-1].u].reparse_ctx != Unit::NO_REPARSE)
     return BUTCH_FAIL;
   if ((s = p._rgx_match(big, p.regex_patterns[patt.len])).start)
   {
@@ -193,7 +201,7 @@ Match Rule::_match_rgx(
   return Rule::TOTAL_FAILURE;
 }
 
-void _butch_split_token(
+int _butch_split_token(
   Parser& p,
   Pack<Unit>& out, // offseted pack
   Match match,
@@ -203,12 +211,16 @@ void _butch_split_token(
   const u32 pre_len = match.s_start - out[0].s_start;
   const u32 post_len = initial_length - pre_len - match.s_len;
   const u32 post_start = match.s_start+match.s_len;
+  int offset = 0;
   out[0].s_len = pre_len;
   out.insert(Unit(rule_idx, match.s_start, match.s_len, 0), 1);
   if (!p._should_be_trimmed(post_start, post_len))
     out.insert(Unit(Unit::LITERAL, post_start, post_len, 0), 2);
   if (p._should_be_trimmed(out[0].s_start, pre_len))
     out.rmv(0); // TODO : optimize this rmv out
+  else
+    offset++;
+  return offset;
 }
 
 void _debug(Parser& p, Pack<Unit>& units)
@@ -216,24 +228,23 @@ void _debug(Parser& p, Pack<Unit>& units)
   p.debug_output(stdout, units.ls().to_view());
 }
 
-void Rule::_apply_context(
+void _butch_apply_context(
   Parser& p,
   Pack<Unit>& units,
   list<Rule::Pt>& u,
+  const Context& ctx,
+  rule_id rid,
   Match m
 ) {
-  assert(is_context());
   assert(units[0].id == Unit::LITERAL);
   assert(units.len == 1);
-  const ctx_id ctid = get_context();
-  const Context& ctx = p.ctxs[ctid];
   Unit* parent = &units[0];
   bool common_malcom_do_somethin = true;
   assert(m.matched);
   const u32 units_s_start = parent->s_start;
   const u32 units_s_len = parent->s_len;
-  const u16 begin_len = m.u_start;
-  const u16 end_len = m.u_end;
+  const i32 begin_len = m.u_start;
+  const i32 end_len = m.u_end;
   const i32 head_len = i32(m.s_start) - units_s_start - begin_len;
   if (!p._should_be_trimmed(units_s_start, head_len))
   {
@@ -250,7 +261,7 @@ void Rule::_apply_context(
   parent = &units[0];
   parent->s_start = m.s_start;
   parent->s_len = m.s_len;
-  parent->id = this - p.rules.data();
+  parent->id = rid;
   parent->children_len = m.s_len > 0;
   if (m.s_len > 0)
   {
@@ -319,9 +330,6 @@ Match Rule::_match_context(
   list<Rule::Pt>& u
 ) {
   // welcome to cache-misses hell
-  //
-  // idea to support non-literals:
-  //  convert temporarily the first unit into a literal, just to test things
 #define LD_BEGIN(IDX) \
   p._comp_str(p.classes[p.in_class(p.rules[ctx.begin[0]], 0)]);
   
@@ -465,8 +473,10 @@ Match Rule::_sequence_match(
 #define NEXT(UU) _next(UU, units.to_view())
 #define FAIL \
   if ( \
-    _butch_failure(u, \
+    _butch_failure( \
     p.rulesets_classes.data()+ruleset_start, \
+    to_view(units), \
+    u, \
     input_len \
   ) == TOTAL_FAILURE) \
     return failure;
@@ -481,6 +491,7 @@ Match Rule::_sequence_match(
     .u_end=(uint16_t)units.len
   };
   bool not_flag = false;
+  u32 prev_u[2] = {0,0};
   u.clear();
   u.push({0, 0}).push({0, 0});
   // printf("===== Rule %s : units.len=%u =====\n",
@@ -489,14 +500,15 @@ Match Rule::_sequence_match(
   // );
   // p.debug_output(stdout, units.ls().to_view());
   // puts("=== vvv ===");
-  while (u[-1].r < input_len && u[-1].u < units.len)
+  while (u[-1].r < input_len)
   {
     // printf(">>> |u|=%u u[-1]={.r=%i,.u=%i}\n",
     //   u.len(),
       //   u[-1].r,
     //   u[-1].u
     // );
-
+    prev_u[0] = prev_u[1];
+    prev_u[1] = u.atn(-1).u;
     if (not_flag)
       not_flag = false;
     switch (*RPTR(-1))
@@ -543,6 +555,14 @@ Match Rule::_sequence_match(
         break;
       case PLUS:
         {
+          if (u[-1].u >= units.len)
+          {
+            if (u[-1].r == input_len-1)
+              return ret;
+            else
+              FAIL;
+          }
+
           uint32_t rp;
           if (*RPTR_OFFSET(-1, -1) == GROUP_END)
           {
@@ -565,17 +585,24 @@ Match Rule::_sequence_match(
           break;
         }
       case REPARSE:
-        assert(false);
+        units[prev_u[0]].reparse_ctx = *CPTR(-1);
+        u[-1].r++;
         break;
       case STRING:
+        if (u[-1].u >= units.len)
+          FAIL;
         if (ret.include(_match_str(p, units.to_view(), u, *CPTR(-1))))
           return failure;
         break;
       case REGEX:
+        if (u[-1].u >= units.len)
+          FAIL;
         if (ret.include(_match_rgx(p, units.to_view(), u, *CPTR(-1))))
           return failure;
         break;
       default: [[likely]];
+        if (u[-1].u >= units.len)
+          FAIL;
         if (p.rules[*RPTR(-1)].is_alias())
         { // aliases
           if (_butch_alias_match(
@@ -635,6 +662,34 @@ i32 _butch_prev(const Pack<Unit>& units, i32 i)
   return -1;
 }
 
+void _butch_reparse(
+  Parser& p,
+  Pack<Unit>& out,
+  list<Rule::Pt>& pt_buffer
+) {
+  Pack<Unit>::State state;
+  for (u32 i = 0; i < out.len; _next(i, out.to_view()))
+  {
+    if (out[i].reparse_ctx >= 0)
+    {
+      out.rmv(i+1, i+1+out[i].children_len);
+      const rule_id prev = out[i].id;
+      out[i].id = Unit::LITERAL;
+      state = out.set(i, 1);
+      _butch_apply_context(
+        p,
+        out,
+        pt_buffer,
+        p.ctxs[out[0].reparse_ctx],
+        prev,
+        Match{out[0].s_start, out[0].s_len, true, 0, 0}
+      );
+      out.reset(state);
+      out[i].reparse_ctx = Unit::NO_REPARSE;
+    }
+  }
+}
+
 bool Parser::_check_and_do_rule(
   Rule& r,
   Pack<Unit>& out,
@@ -648,12 +703,10 @@ bool Parser::_check_and_do_rule(
   auto dyn_out_rev_iter = [&out](DynDirRange<u32>& i){ _butch_prev(out, i); };
   Pack<Unit>::State state;
 
-  char c = classes[r.out].fix();
-  printf(">>>> %s <<<<\n", classes[r.out].start);
-  classes[r.out].mov(c);
-  debug_output(stdout, out.to_view());
-
-  assert(!(flags & _FLAG_START_FIXED_MATCH)); // TEMP
+  // char c = classes[r.out].fix();
+  // printf(">>>> %s <<<<\n", classes[r.out].start);
+  // classes[r.out].mov(c);
+  // debug_output(stdout, out.to_view());
 
   if (r.is_context())
   {
@@ -665,7 +718,14 @@ bool Parser::_check_and_do_rule(
         match = r._match_context(*this, out, pt_buffer);
         if (match.matched)
         {
-          r._apply_context(*this, out, pt_buffer, match);
+          _butch_apply_context(
+            *this,
+            out,
+            pt_buffer,
+            ctxs[r.get_context()],
+            rule_idx,
+            match
+          );
           did_something = true;
         }
         out.reset(state);
@@ -687,7 +747,10 @@ bool Parser::_check_and_do_rule(
         if (match.matched)
         {
           state = out.set(i, 1);
-          _butch_split_token(*this, out, match, rule_idx);
+          const int pre_off = _butch_split_token(*this, out, match, rule_idx);
+          out.reset(state);
+          state = out.set(i+pre_off, 1);
+          _butch_reparse(*this, out, pt_buffer);
           out.reset(state);
           did_something = true;
         }
@@ -715,6 +778,9 @@ bool Parser::_check_and_do_rule(
             ),
             i+match.u_start
           );
+          state = out.set(i+match.u_start+1, match.u_end-match.u_start-1);
+          _butch_reparse(*this, out, pt_buffer);
+          out.reset(state);
           did_something = true;
           j++;
         }
@@ -743,6 +809,9 @@ bool Parser::_check_and_do_rule(
             ),
             i+match.u_start
           );
+          state = out.set(i+match.u_start+1, match.u_end-match.u_start-1);
+          _butch_reparse(*this, out, pt_buffer);
+          out.reset(state);
           did_something = true;
           j++;
         }
@@ -800,14 +869,7 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     const View<char> s =
       ls[i].id == Unit::LITERAL ? ls[i].str(*this)
                                 : classes[rules[ls[i].id].out];
-    if (ls[i].ctx >= 0)
-    {
-      const class_id cid = ctxs[ls[i].ctx].name;
-      c = classes[cid].fix();
-      fprintf(f, "(%s)", classes[cid].start);
-      classes[cid].mov(c);
-    }
-    else if (ls[i].ctx == Unit::ERROR_CONTEXT_MISMATCH)
+    if (ls[i].reparse_ctx == Unit::ERROR_CONTEXT_MISMATCH)
       fprintf(f, "(!CONTEXT_MISMATCH)");
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);

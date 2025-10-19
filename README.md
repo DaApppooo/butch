@@ -1,19 +1,23 @@
 
 # Butch
 
-Butch is a heavy lexer+parser that's only limited by python-like syntaxes. The idea is that you 
+Butch is a contextual lexer+parser that's only limited by python-like syntaxes. Butch is both a standard and the provided implementation.
 
-## Concepts
+## Introduction
+
+### When to use butch ?
+
+Butch isn't intended to be as fast as a hand-written tokenizer+parser. Butch is only intended to be used as a tool to quickly write the lexer and the parser for your language and skip to the interesting part (scopes, typing system, etc...). I'd still like butch to be fast, but it seems impossible for it to be faster than a well thought tokenizer+parser hand made for one specific language.
 
 ### Lexic
 
-Butch doesn't really work with tokens and abstract syntax tree nodes (AST), but instead works with <u>units</u>. Units are both tokens (when they have no children\*) and AST nodes. A token kind of unit can be sub-parsed and become a AST node for example.
+Butch doesn't really work with tokens and abstract syntax tree nodes (AST), but instead works with <u>units</u>. Units are both tokens (when they have no children\*) and AST nodes. A token-like unit can be sub-parsed (with "reparsing") and become a AST node for example.
 
-<u>Rules</u> are functions that take a list of units as input, try to match them against their ruleset, and if there's a match, spits out a unit with the specified output class . Rules can contain classes, strings, regexes, aliases and symbols.
+<u>Rules</u> are functions that take a list of units as input, try to match them against their ruleset, and if there's a match, spits out a unit with the specified output class and all of the elements contained in the match as children. Rules can contain classes, strings, regexes, aliases and symbols.
 
 <u>Classes</u> are the identifier for what a unit represents. You can see units as instances of classes.
 
-<u>Symbols</u> are characters like `(` and `!` that lets you do non-deterministic parsing of your units.
+<u>Symbols</u> are characters like `(` and `!` that lets you do non-deterministic parsing of your code.
 
 <u>Literal</u> is the default class that represents unparsed code (it cannot be accessed within butch code).
 
@@ -52,7 +56,7 @@ Regex matches are exactly like strings except that escaped characters are treate
 
 ### Classes
 
-Classes are simple names, use whatever convention you want, but I suggest using pascal case (that's what you'll see in the examples). Classes can contain numbers (yes, even as their first character), and can even just be numbers. You can also add in special characters that aren't considered "symbols", but I advise against this because butch will evolve and might start using new symbols.
+Classes are simple names, use whatever convention you want, but I suggest using PascalCase (that's what you'll see in the examples, and to keywords are constrained to this case - or similar ones). Classes can contain numbers (yes, even as their first character), and can even just be numbers. You can't add special symbols in classes (except in the case of aliases with the `?`).
 
 ### Symbols
 
@@ -258,6 +262,33 @@ FuncDecl = Name Name PARENTHESIS{FUNC_DECL_ARGS}
   Sep = ","
   ArgDecl = Name Name
 ```
+
+It's important to note that a context used with CrP doesn't necessarily have a rule associated with it. Because of that, the id of the unit that was transformed back into a literal will have the id of the previously matched rule. For example, with the previous example, when for `FuncDecl` there's a match, the output can look like this:
+
+```
+FuncDecl
+  Name
+  Name
+  PARENTHESIS
+    ArgDecl
+    Sep
+    ArgDecl
+```
+
+Where the id of the unit for the argument list isn't `FUNC_DECL_ARGS` (because the id of a unit is the index of a rule).
+
+Also, you don't necessarily need to reparse a context. For example, if you want to reparse a token:
+
+```
+Float = '[+-]?([0-9_]*[.][0-9]+|[0-9]+[.])'{FLOAT}
+= FLOAT
+  Sign = '[+-]'
+  Decimal = '[0-9]+'
+  Point = "."
+  Exponent = '[eE]' # won't ever appear in the children of Float
+```
+
+Obviously you cannot put CrP in a `Begin`, an `End`, an alias or a context rule.
 
 ## The interface
 
