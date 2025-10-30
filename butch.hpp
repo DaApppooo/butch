@@ -374,7 +374,8 @@ struct Parser
       REPARSE_SYNTAX_ERROR,
       CONTEXT_MISSING_BEGIN,
       CONTEXT_MISSING_END,
-      CONTEXT_SPECS_ERROR
+      CONTEXT_SPECS_ERROR,
+      DESERIALIZATION_ERROR
     } type;
     union { uint32_t offset; Own<char*> name; };
   };
@@ -422,11 +423,14 @@ struct Parser
 
   size_t serialize_file(FILE*);
   Own<char*> serialize(size_t*);
-  size_t serialize(size_t(*)(const void*, size_t, void*), void*);
+  size_t serialize(size_t(*)(const void* src, size_t, void* data), void*);
 
-  size_t deserialize_file(FILE*);
-  size_t deserialize(char*, size_t);
-  size_t deserialize(size_t(*)(void*, size_t, void*), void*);
+  static Result<Own<Parser>, Error> deserialize_file(FILE*);
+  static Result<Own<Parser>, Error> deserialize(const char*, size_t);
+  static Result<Own<Parser>, Error> deserialize(
+    size_t(*)(void* dst, size_t, void* data),
+    void*
+  );
 
   void debug(FILE* f);
   void debug_output(FILE* f, const View<Unit> ls);

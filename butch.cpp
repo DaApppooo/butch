@@ -250,6 +250,107 @@ size_t Parser::serialize(
   STORE;
 
   return total;
+#undef STORE
 }
 
+Result<Own<Parser>, Parser::Error> Parser::deserialize_file(FILE* f)
+{
+  const auto callback = [](void* src, size_t size, void* data)
+  {
+    return fread(src, size, 1, (FILE*)data);
+  };
+  return Parser::deserialize(callback, f);
+}
+
+Result<Own<Parser>, Parser::Error> deserialize(const char* p, size_t size)
+{
+  struct P { const char* a, *b; };
+  P data = {p, p+size};
+  const auto callback = [](void* dst, size_t size, void* data)
+  {
+    auto& p = *(P*)data;
+    if (p.b - p.a < size)
+      return 0UL;
+    memcpy(dst, p.a, size);
+    p.a += size;
+    return size;
+  };
+  return Parser::deserialize(callback, (void*)&data);
+}
+
+Result<Own<Parser>, Parser::Error> Parser::deserialize(
+  size_t(*callback)(void*,size_t,void*),
+  void* data
+) {
+#define STORE { \
+    if (!temp) \
+    { \
+      self.destroy(); \
+      return err<Parser>(Error{ \
+        .type=Error::DESERIALIZATION_ERROR, .offset=0}); \
+    } \
+    else \
+    { \
+      total += temp; \
+    } \
+  }
+  constexpr size_t length_size = sizeof(ctxs._len);
+  decltype(ctxs._len) ls_len;
+  size_t total = 0, temp;
+  char* s;
+  Parser self;
+  // 1. compute total code length
+  size_t len = 0;
+  temp = callback(&len, sizeof(size_t), data);
+  STORE;
+  self.butch_code = (char*)malloc(len);
+  // 2. copy only the necessary butch code
+  temp = callback(self.butch_code, len, data);
+  STORE;
+  // 3. copy classes (with offsets fixed)
+  temp = callback(&classes._len, length_size, data);
+  STORE;
+  len = 0;
+  for (View<char> v : classes)
+  {
+    struct { size_t s; decltype(v.len) l; } obj;
+
+    obj.s = len;
+    obj.l = v.len;
+    temp = callback(&obj, sizeof(obj), data);
+    STORE;
+
+    if (*v.start != '\'')
+    {
+      len += v.len;
+      continue;
+    }
+    s = v.start;
+    while (*s != '\'' && *s != 0) s++;
+    len += s - v.start;
+  }
+  // 4. Then copy everything else in bulk
+  temp = callback(&ctxs._len, length_size, data);
+  STORE;
+  temp = callback(&rules._len, length_size, data);
+  STORE;
+  temp = callback(&rulesets_rules._len, length_size, data);
+  STORE;
+  // this is the same as rulesets_rules._len so we skip
+  // temp = callback(&rulesets_classes._len, length_size, data);
+  // STORE;
+  temp = callback(&flags, sizeof(flags)+sizeof(flags_data), data);
+  STORE;
+  
+  temp = callback(ctxs.data(), sizeof(Context)*ctxs.len(), data);
+  STORE;
+  temp = callback(rules.data(), sizeof(Rule)*rules.len(), data);
+  STORE;
+  temp = callback(rulesets_rules.data(), sizeof(rule_id)*rulesets_rules.len(), data);
+  STORE;
+  temp = callback(rulesets_classes.data(), sizeof(class_id)*rulesets_classes.len(), data);
+  STORE;
+
+  return total;
+}
 

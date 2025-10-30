@@ -355,7 +355,10 @@ size_t my_parser.serialize(
 )
 // And for deserialization
 Result<Parser, Parser::Error> Parser::deserialize_file(FILE*)
-Result<Parser, Parser::Error> Parser::deserialize(void*& ptr, size_t len)
+Result<Parser, Parser::Error> Parser::deserialize(
+  const char* ptr,
+  size_t len
+)
 Result<Parser, Parser::Error> Parser::deserialize(
   size_t(*callback)(void* dst, size_t len, void* _data),
   void* data
