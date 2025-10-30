@@ -1,11 +1,11 @@
 
 ! Parenthesis
-# String = '".*?[^\\]"'
-# Eq = "="
-# Int = '[+-]?[0-9][0-9_]*'
-# Float = '[+-]?(([0-9][0-9_]*)?[.][0-9][0-9_]*|[0-9][0-9_]*[.])'
+String = '".*?[^\\]"'
+Eq = "="
+Int = '[+-]?[0-9][0-9_]*'
+Float = '[+-]?(([0-9][0-9_]*)?[.][0-9][0-9_]*|[0-9][0-9_]*[.])'
 Name = '[a-z_]+'
-# ?Value = String Int Float
+?Value = String Int Float
 
 FuncDecl = Name Name Parenthesis{FuncDeclArgs}
 
@@ -15,8 +15,8 @@ FuncDecl = Name Name Parenthesis{FuncDeclArgs}
   ! Parenthesis
 
 = FuncDeclArgs
-  # + String Name Eq Int Float
+  + String Name Eq Int Float
   Sep = ","
   Arg = Name Name
-  # ArgDefault = Arg Eq ?Value
+  ArgDefault = Arg Eq ?Value
 

@@ -104,7 +104,7 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
         default:
         {
           start = s;
-          while (isalnum(*s))
+          while (isalnum(*s) || *s == '?')
             s++;
           const class_id cid = _find_or_make_class(View(start, s));
           const rule_id rid = _find_rule(cid);

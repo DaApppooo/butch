@@ -279,13 +279,14 @@ void _butch_apply_context(
       for (Rule& r : p.rules.slice(ctx.rules_start, ctx.rule_count))
       {
         if (r.out == Rule::BEGIN || r.out == Rule::END)
-          continue;
+         continue;
         common_malcom_do_somethin =
           p._check_and_do_rule(r, units, u)
           || common_malcom_do_somethin;
       }
     }
     units.start--;
+    printf("++++++ %i <- %i\n", units.start, units.len);
     units[0].children_len = units.len;
     units.len++;
   }
@@ -667,13 +668,15 @@ void _butch_reparse(
   Pack<Unit>& out,
   list<Rule::Pt>& pt_buffer
 ) {
+  assert(out.start > 0);
   Pack<Unit>::State state;
   for (u32 i = 0; i < out.len; _next(i, out.to_view()))
   {
     if (out[i].reparse_ctx >= 0)
     {
-      out.rmv(i+1, i+1+out[i].children_len);
       const rule_id prev = out[i].id;
+      const i32 prev_cc = out[i].children_len;
+      out.rmv(i+1, i+1+prev_cc);
       out[i].id = Unit::LITERAL;
       state = out.set(i, 1);
       _butch_apply_context(
@@ -685,7 +688,11 @@ void _butch_reparse(
         Match{out[0].s_start, out[0].s_len, true, 0, 0}
       );
       out.reset(state);
+      out[i].id = prev;
       out[i].reparse_ctx = Unit::NO_REPARSE;
+      out.ls()[out.start-1].children_len += out[i].children_len - prev_cc;
+      puts("CHANGED:");
+      _debug(p, out);
     }
   }
 }
@@ -703,10 +710,10 @@ bool Parser::_check_and_do_rule(
   auto dyn_out_rev_iter = [&out](DynDirRange<u32>& i){ _butch_prev(out, i); };
   Pack<Unit>::State state;
 
-  // char c = classes[r.out].fix();
-  // printf(">>>> %s <<<<\n", classes[r.out].start);
-  // classes[r.out].mov(c);
-  // debug_output(stdout, out.to_view());
+  char c = classes[r.out].fix();
+  printf(">>>> %s <<<<\n", classes[r.out].start);
+  classes[r.out].mov(c);
+  debug_output(stdout, out.to_view());
 
   if (r.is_context())
   {
@@ -749,9 +756,6 @@ bool Parser::_check_and_do_rule(
           state = out.set(i, 1);
           const int pre_off = _butch_split_token(*this, out, match, rule_idx);
           out.reset(state);
-          state = out.set(i+pre_off, 1);
-          _butch_reparse(*this, out, pt_buffer);
-          out.reset(state);
           did_something = true;
         }
       }
@@ -790,7 +794,6 @@ bool Parser::_check_and_do_rule(
   }
   else
   {
-    // top-class abstract syntax node type
     for (u32 i = 0; i < out.len; _next(i, out.to_view()))
     {
       u32 j = i;
@@ -880,9 +883,10 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     putc(' ', f);
     // fprintf(f, "(%i) ", ls[i].children_len);
     if (ls[i].id != Unit::LITERAL && rules[ls[i].id].is_token())
-      fprintf(f, "'%s'\n", _load_str(ls[i].str(*this)));
+      fprintf(f, "'%s'", _load_str(ls[i].str(*this)));
     else
-      fprintf(f, "[%i:+%i]\n", ls[i].s_start, ls[i].s_len);
+      fprintf(f, "[%i:+%i]", ls[i].s_start, ls[i].s_len);
+    fprintf(f, " (%i)\n", ls[i].children_len);
     if (ls[i].children_len > 0)
     {
       depth_stack[depth_pt++] = ls[i].children_len+1;
