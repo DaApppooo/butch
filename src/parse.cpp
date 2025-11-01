@@ -803,7 +803,6 @@ bool Parser::_check_and_do_rule(
           did_something = true;
           j++;
         }
-        _next(j, out.to_view());
       }
     }
   }

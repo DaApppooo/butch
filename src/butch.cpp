@@ -18,8 +18,9 @@ Own<char*> _butch_read_file(Ref<const char*> filename)
   const long len = ftell(f);
   fseek(f, 0, SEEK_SET);
   auto s = (char*)malloc(len+1);
-  fread(s, 1, len, f);
+  const size_t res = fread(s, 1, len, f);
   fclose(f);
+  assert(res == len);
   s[len] = 0;
   return s;
 }
@@ -166,7 +167,7 @@ size_t Parser::serialize_file(FILE* f)
 {
   const auto callback = [](const void* src, size_t size, void* data)
   {
-    return fwrite(src, size, 1, (FILE*)data);
+    return fwrite(src, 1, size, (FILE*)data);
   };
   return serialize(callback, f);
 }
@@ -228,14 +229,15 @@ size_t Parser::serialize(
   {
     if (*v.start == '\'')
     {
-      s = v.start;
+      s = v.start+1;
       while (*s != '\'' && *s != 0) s++;
-      len = s - v.start;
+      len = s - v.start+1;
     }
     else
       len = v.len;
     temp = callback(v.start, len, data);
-    STORE;
+    if (len != 0)
+    { STORE; }
   }
   // 3. copy classes (with offsets fixed)
   temp = callback(&classes._len, length_size, data);
@@ -285,21 +287,25 @@ size_t Parser::serialize(
   // STORE;
   
   temp = callback(ctxs.data(), sizeof(Context)*ctxs.len(), data);
-  STORE;
+  if (ctxs.len() > 0)
+  { STORE; }
   temp = callback(rules.data(), sizeof(Rule)*rules.len(), data);
-  STORE;
+  if (rules.len() > 0)
+  { STORE; }
   temp = callback(
     rulesets_rules.data(),
     sizeof(rule_id)*rulesets_rules.len(),
     data
   );
-  STORE;
+  if (rulesets_rules.len() > 0)
+  { STORE; }
   temp = callback(
     rulesets_classes.data(),
     sizeof(class_id)*rulesets_classes.len(),
     data
   );
-  STORE;
+  if (rulesets_classes.len() > 0)
+  { STORE; }
 
   return total;
 #undef STORE
@@ -309,7 +315,7 @@ Result<Own<Parser>, Parser::Error> Parser::deserialize_file(FILE* f)
 {
   const auto callback = [](void* src, size_t size, void* data)
   {
-    return fread(src, size, 1, (FILE*)data);
+    return size*fread(src, size, 1, (FILE*)data);
   };
   return Parser::deserialize(callback, f);
 }

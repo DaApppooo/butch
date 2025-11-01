@@ -2,17 +2,18 @@
 from os import listdir, path, system, remove
 from sys import argv
 
+def fname(s: str) -> str:
+  return s.rsplit('/', 1)[1]
 def chext(s: str, new: str) -> str:
   return s.rsplit('.',1)[0]+new
 
-SRC = [p for p in listdir() if p.endswith('.cpp')]
+SRC = [f'src/{p}' for p in listdir('src') if p.endswith('.cpp')]
 OBJ = [chext(p,'.o') for p in SRC]
-FLAGS = "-Wall"
-EXAMPLE_ARGS = "./test.butch ./test.code"
-EXAMPLE = "readparse.cpp"
-SRC.remove(EXAMPLE)
-EXAMPLE_BIN = chext(EXAMPLE,'.out')
-EXAMPLE_CMD = f"./{EXAMPLE_BIN} {EXAMPLE_ARGS}"
+FLAGS = "-Isrc"
+EXAMPLE_ARGS = "./test.butch ./test.ser"
+EXAMPLE = "examples/readser.cpp"
+EXAMPLE_BIN = 'bin/' + fname(chext(EXAMPLE,'.out'))
+EXAMPLE_CMD = f"{EXAMPLE_BIN} {EXAMPLE_ARGS}"
 SRC_ARG = ' '.join(SRC)
 
 def run(cmd: str, show = True):
@@ -46,14 +47,14 @@ elif  argv[1] == "clean":
       remove(l)
 elif  argv[1] == "shared":
   run(f"""
-    g++ {SRC_ARG} -fPIC -shared -O3 -o libbutch.so {FLAGS} || exit 1
-    \\ls libbutch.so
+    g++ {SRC_ARG} -fPIC -shared -O3 -o bin/libbutch.so {FLAGS} || exit 1
+    \\ls bin/libbutch.so
   """)
 elif argv[1] == "static":
   for src, obj in zip(SRC, OBJ):
     run(f"g++ -c {src} -o {obj} -O3")
-  run(f"ar rcs libbutch.a {' '.join(OBJ)}")
-  run(f"\\ls libbutch.a", False)
+  run(f"ar rcs bin/libbutch.a {' '.join(OBJ)}")
+  run(f"\\ls bin/libbutch.a", False)
 else:
   run(f"g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} -g {FLAGS} || exit 1")
   run(EXAMPLE_CMD)

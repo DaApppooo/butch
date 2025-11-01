@@ -537,13 +537,14 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
 
 void Parser::debug(FILE* f)
 {
+  assume(rulesets_classes._len == rulesets_rules._len);
   char c;
   int i = 0;
   uint32_t k = 0;
   fprintf(f, "=== Classes (4 columns) ===\n");
   for (View<char>& t : classes)
   {
-    if (t.start)
+    if (*t.start != '\'')
     {
       c = t.fix();
       fprintf(f, "  %s", t.start);
