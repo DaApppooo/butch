@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "list.hpp"
 #include "stuff.hpp"
 #include "butch.hpp"
 
@@ -33,7 +34,7 @@ Own<char*> _butch_allocpy_view(const View<char> v)
 
 View<char> Unit::str(const Parser& p)
 {
-  return View<char>(p.parsed_code.start+s_start, s_len);
+  return View<char>::range(p.parsed_code.start+s_start, s_len);
 }
 
 bool Unit::is(const Parser& p, const View<char> s)
@@ -42,7 +43,7 @@ bool Unit::is(const Parser& p, const View<char> s)
   if (id == LITERAL) return false;
   Rule* r = nullptr;
   rule_id rid;
-  for (int i = 0; i < p.rules.len(); i++)
+  for (u32 i = 0; i < p.rules.len(); i++)
   {
     if (p.classes[p.rules[i].out] == s)
     { r = p.rules.data() + i; rid = i; break; }
@@ -75,6 +76,28 @@ const char* Parser::_load_str(
     );
   buff.data()[start.len+s.len+surround.len*2] = 0;
   return buff.data();
+}
+
+i32 Parser::_comp_rgx(const View<char> patt, rule_id rout)
+{
+  const View<char> surround =
+    flags & FLAG_ISOLATED_MODE_REGEX
+    ? View<char>::range((char*)"\\b", 3) : View<char>::empty();
+  const View<char> ld_start =
+    rout == Rule::BEGIN || rout == Rule::END
+    ? View<char>::range((char*)"^", 1) : View<char>::empty();
+  const char* const cstr_patt = _load_str(patt, surround, ld_start);
+  regex_patterns.push_ref(RegexPatt());
+  try
+  {
+    regex_patterns[-1] = RegexPatt(cstr_patt);
+  }
+  catch (std::regex_error& err)
+  {
+     classes.push(View<char>::range((char*)err.what(), 0U));
+     return -1;
+  }
+  return regex_patterns.len()-1;
 }
 
 int _butch_hex2byte(const char* const p)
@@ -166,6 +189,12 @@ char* Parser::serialize(size_t* s)
   return (char*)data.data();
 }
 
+struct SerializedClass
+{
+  size_t s;
+  decltype(View<char>::len) l;
+  u32 flags; // << this only exists because we can't serialize regex for now
+};
 
 size_t Parser::serialize(
   size_t(*callback)(const void*,size_t,void*),
@@ -175,6 +204,9 @@ size_t Parser::serialize(
   constexpr size_t length_size = sizeof(ctxs._len);
   size_t total = 0, temp;
   char* s;
+  // 0. flags
+  temp = callback(&flags, sizeof(flags)+sizeof(flags_data), data);
+  STORE;
   // 1. compute total code length
   size_t len = 0;
   for (View<char> v : classes)
@@ -209,12 +241,26 @@ size_t Parser::serialize(
   temp = callback(&classes._len, length_size, data);
   STORE;
   len = 0;
-  for (View<char> v : classes)
+  const u32 cl_len = classes.len();
+  for (u32 i = 0; i < cl_len; i++)
   {
-    struct { size_t s; decltype(v.len) l; } obj;
+    View<char> v = classes[i];
+    SerializedClass obj;
 
     obj.s = len;
     obj.l = v.len;
+    obj.flags = 0;
+    for (Rule& r : rules)
+    {
+      if (
+        (r.out == Rule::BEGIN
+      || r.out == Rule::END)
+      && in_class(r, 0) == class_id(i)
+      ) {
+        obj.flags = 1;
+        break;
+      }
+    }
     temp = callback(&obj, sizeof(obj), data);
     STORE;
 
@@ -237,16 +283,22 @@ size_t Parser::serialize(
   // this is the same as rulesets_rules._len so we skip
   // temp = callback(&rulesets_classes._len, length_size, data);
   // STORE;
-  temp = callback(&flags, sizeof(flags)+sizeof(flags_data), data);
-  STORE;
   
   temp = callback(ctxs.data(), sizeof(Context)*ctxs.len(), data);
   STORE;
   temp = callback(rules.data(), sizeof(Rule)*rules.len(), data);
   STORE;
-  temp = callback(rulesets_rules.data(), sizeof(rule_id)*rulesets_rules.len(), data);
+  temp = callback(
+    rulesets_rules.data(),
+    sizeof(rule_id)*rulesets_rules.len(),
+    data
+  );
   STORE;
-  temp = callback(rulesets_classes.data(), sizeof(class_id)*rulesets_classes.len(), data);
+  temp = callback(
+    rulesets_classes.data(),
+    sizeof(class_id)*rulesets_classes.len(),
+    data
+  );
   STORE;
 
   return total;
@@ -269,7 +321,8 @@ Result<Own<Parser>, Parser::Error> deserialize(const char* p, size_t size)
   const auto callback = [](void* dst, size_t size, void* data)
   {
     auto& p = *(P*)data;
-    if (p.b - p.a < size)
+    [[assume(p.b >= p.a)]];
+    if (u64(p.b - p.a) < size)
       return 0UL;
     memcpy(dst, p.a, size);
     p.a += size;
@@ -295,12 +348,15 @@ Result<Own<Parser>, Parser::Error> Parser::deserialize(
     } \
   }
   constexpr size_t length_size = sizeof(ctxs._len);
-  decltype(ctxs._len) ls_len;
-  size_t total = 0, temp;
-  char* s;
   Parser self;
-  // 1. compute total code length
+  size_t total = 0, temp;
   size_t len = 0;
+  decltype(ctxs._len) ls_len, i;
+  i32 regex_index;
+  // 0. flags
+  temp = callback(&self.flags, sizeof(flags)+sizeof(flags_data), data);
+  STORE;
+  // 1. compute total code length
   temp = callback(&len, sizeof(size_t), data);
   STORE;
   self.butch_code = (char*)malloc(len);
@@ -308,49 +364,69 @@ Result<Own<Parser>, Parser::Error> Parser::deserialize(
   temp = callback(self.butch_code, len, data);
   STORE;
   // 3. copy classes (with offsets fixed)
-  temp = callback(&classes._len, length_size, data);
+  temp = callback(&ls_len, length_size, data);
   STORE;
+  self.classes.prealloc(ls_len);
   len = 0;
-  for (View<char> v : classes)
+  for (i = 0; i < ls_len; i++)
   {
-    struct { size_t s; decltype(v.len) l; } obj;
+    SerializedClass obj;
 
-    obj.s = len;
-    obj.l = v.len;
     temp = callback(&obj, sizeof(obj), data);
     STORE;
 
-    if (*v.start != '\'')
+    const View<char> patt = View<char>::range(self.butch_code+obj.s, obj.l);
+    if (self.butch_code[obj.s] != '\'')
     {
-      len += v.len;
+      self.classes.push(patt);
       continue;
     }
-    s = v.start;
-    while (*s != '\'' && *s != 0) s++;
-    len += s - v.start;
+    regex_index = self._comp_rgx(patt, obj.flags ? Rule::BEGIN : 0);
+    assert(regex_index >= 0);
+    self.classes.push(View<char>::range(patt.start, regex_index));
   }
   // 4. Then copy everything else in bulk
-  temp = callback(&ctxs._len, length_size, data);
+  temp = callback(&ls_len, length_size, data);
   STORE;
-  temp = callback(&rules._len, length_size, data);
+  self.ctxs.prealloc(ls_len);
+  self.ctxs.set_len(ls_len);
+  temp = callback(&ls_len, length_size, data);
   STORE;
-  temp = callback(&rulesets_rules._len, length_size, data);
+  self.rules.prealloc(ls_len);
+  self.rules.set_len(ls_len);
+  temp = callback(&ls_len, length_size, data);
   STORE;
-  // this is the same as rulesets_rules._len so we skip
-  // temp = callback(&rulesets_classes._len, length_size, data);
-  // STORE;
-  temp = callback(&flags, sizeof(flags)+sizeof(flags_data), data);
-  STORE;
+  self.rulesets_rules.prealloc(ls_len);
+  self.rulesets_rules.set_len(ls_len);
+  self.rulesets_classes.prealloc(ls_len);
+  self.rulesets_classes.set_len(ls_len);
   
-  temp = callback(ctxs.data(), sizeof(Context)*ctxs.len(), data);
+  temp = callback(
+    self.ctxs.data(),
+    sizeof(Context)*self.ctxs.len(),
+    data
+  );
   STORE;
-  temp = callback(rules.data(), sizeof(Rule)*rules.len(), data);
+  temp = callback(
+    self.rules.data(),
+    sizeof(Rule)*self.rules.len(),
+    data
+  );
   STORE;
-  temp = callback(rulesets_rules.data(), sizeof(rule_id)*rulesets_rules.len(), data);
+  temp = callback(
+    self.rulesets_rules.data(),
+    sizeof(rule_id)*self.rulesets_rules.len(),
+    data
+  );
   STORE;
-  temp = callback(rulesets_classes.data(), sizeof(class_id)*rulesets_classes.len(), data);
+  temp = callback(
+    self.rulesets_classes.data(),
+    sizeof(class_id)*self.rulesets_classes.len(),
+    data
+  );
   STORE;
 
-  return total;
+  return ok<Error>(self);
+#undef STORE
 }
 

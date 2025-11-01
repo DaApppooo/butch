@@ -7,6 +7,7 @@ def chext(s: str, new: str) -> str:
 
 SRC = [p for p in listdir() if p.endswith('.cpp')]
 OBJ = [chext(p,'.o') for p in SRC]
+FLAGS = "-Wall"
 EXAMPLE_ARGS = "./test.butch ./test.code"
 EXAMPLE = "readparse.cpp"
 SRC.remove(EXAMPLE)
@@ -24,18 +25,18 @@ argv.append('')
 if argv[1] == "pg":
   # to use with KCacheGrind
   run(f"""
-    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} -g || exit 1
+    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} {FLAGS} -g || exit 1
     valgrind --tool=callgrind --callgrind-out-file=callgrind.output {EXAMPLE_CMD} || exit 1
   """)
 elif  argv[1] == "san":
   run(f"""
-    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} -g --sanitize=address || exit 1
+    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} {FLAGS} -g --sanitize=address || exit 1
     {EXAMPLE_CMD}
   """)
 elif  argv[1] == "db":
   # simple gdb
   run(f"""
-    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} -g || exit 1
+    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} {FLAGS} -g || exit 1
     gdb --args {EXAMPLE_CMD} || exit 1
   """)
 elif  argv[1] == "clean":
@@ -45,7 +46,7 @@ elif  argv[1] == "clean":
       remove(l)
 elif  argv[1] == "shared":
   run(f"""
-    g++ {SRC_ARG} -fPIC -shared -O3 -o libbutch.so || exit 1
+    g++ {SRC_ARG} -fPIC -shared -O3 -o libbutch.so {FLAGS} || exit 1
     \\ls libbutch.so
   """)
 elif argv[1] == "static":
@@ -54,6 +55,6 @@ elif argv[1] == "static":
   run(f"ar rcs libbutch.a {' '.join(OBJ)}")
   run(f"\\ls libbutch.a", False)
 else:
-  run(f"g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} -g || exit 1")
+  run(f"g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} -g {FLAGS} || exit 1")
   run(EXAMPLE_CMD)
 

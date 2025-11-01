@@ -129,15 +129,16 @@ struct View
 {
   using mut_T = std::remove_const<T>;
   T* start; uint32_t len;
-  constexpr View() : start(nullptr), len(0) {}
-  constexpr View(T* start, uint32_t len) : start(start), len(len) {}
-  constexpr View(T* start, T* end) : start(start), len(end-start) {}
-  constexpr View(const View<T>& v) : start(v.start), len(v.len) {}
-  constexpr View(const View<T>&& v) : start(v.start), len(v.len) {}
+  static constexpr View<T> range(T* s, uint32_t len)
+  { return {s, len}; }
+  static constexpr View<T> from(T* s)
+  { return {s, 0U}; }
+  static constexpr View<T> empty() { return {nullptr, 0}; }
+  View<T>& to(T* end)
+  { len = end - start; return *this; }
+
   T& operator [] (int index) const
   { if (index < 0) index += len; return start[index]; }
-  View<T>& operator = (const View<T>& v)
-  { start = v.start; len = v.len; return *this; }
   View<mut_T> mut() const
   { return {const_cast<mut_T>(start), len}; }
   View<T> shorten(int start_off, int end_off)
@@ -148,7 +149,7 @@ struct View
   constexpr inline T& operator * () const { return *start; }
   constexpr inline View<T> begin() const { return *this; }
   constexpr inline View<T> end() const
-  { return View(start+len, start+len); }
+  { return View::from(start+len).to(start+len); }
   constexpr inline bool operator < (View<T> other) const
   { return start < other.start; }
   constexpr inline bool operator != (View<T> other) const
@@ -162,16 +163,22 @@ template <>
 struct View<char>
 {
   char* start; uint32_t len;
-  constexpr View() : start(nullptr), len(0) {}
-  constexpr View(char* start, uint32_t len) : start(start), len(len) {}
-  constexpr View(char* start, char* end) : start(start), len(end-start) {}
-  constexpr View(const View<char>& v) : start(v.start), len(v.len) {}
-  constexpr View(const View<char>&& v) : start(v.start), len(v.len) {}
+  // constexpr View() : start(nullptr), len(0) {}
+  // constexpr View(char* start, uint32_t len) : start(start), len(len) {}
+  // constexpr View(char* start, char* end) : start(start), len(end-start) {}
+  // constexpr View(const View<char>& v) : start(v.start), len(v.len) {}
+  // constexpr View(const View<char>&& v) : start(v.start), len(v.len) {}
+  static constexpr View<char> range(char* s, uint32_t len)
+  { return {s, len}; }
+  static constexpr View<char> from(char* s)
+  { return {s, 0U}; }
+  static constexpr View<char> empty() { return {nullptr, 0}; }
+  View<char>& to(char* end)
+  { len = end - start; return *this; }
+
   char* end() { return start + len; }
   char& operator [] (int index) const
   { if (index < 0) index += len; return start[index]; }
-  View<char>& operator = (const View<char>& v)
-  { start = v.start; len = v.len; return *this; }
   constexpr inline bool operator == (const View<char>& v)
   { return !(len != v.len || memcmp(start, v.start, len)); }
   char fix() const
@@ -179,7 +186,7 @@ struct View<char>
   void mov(char c) const
   { start[len] = c; }
   View<char> shorten(int start_off, int end_off)
-  { return View<char>(start+start_off, len-start_off-end_off); }
+  { return View<char>::range(start+start_off, len-start_off-end_off); }
 };
 
 template <class T>
@@ -392,7 +399,7 @@ GEN inline Self& list<T>::clear()
 }
 GEN inline View<T> list<T>::slice(int start, int len) const
 {
-  return View<T>(_data+start, len);
+  return View<T>::range(_data+start, len);
 }
 GEN inline uint32_t list<T>::cap() const { return _cap; }
 GEN inline T* list<T>::data() const { return _data; }
@@ -414,7 +421,6 @@ GEN inline Self& list<T>::init()
 
 GEN inline Self& list<T>::prealloc(uint32_t size)
 {
-  const uint32_t l = len();
   if (size <= _cap)
     return self;
   _cap = size;
@@ -536,7 +542,7 @@ GEN inline Self& list<T>::insert(T element, int index)
   {
     index = len() + index;
   }
-  if (len() < 1 || index == len())
+  if (len() < 1 || uint32_t(index) == len())
   {
     self.push(element);
     return self;
@@ -593,7 +599,7 @@ GEN Self& list<T>::rmv(int start, int end)
 
 GEN inline View<T> list<T>::to_view() const
 {
-  return View<T>(_data, len());
+  return View<T>::range(_data, len());
 }
 
 // Object is not destroyed !!!
@@ -839,7 +845,7 @@ public:
   inline Self& rmv(int index);
   inline View<T> to_view() const
   {
-    return View<T>(_data, len());
+    return View<T>::range(_data, len());
   }
   Self& rmv_range(std::initializer_list<int> start_end);
   inline Self& clear();
@@ -950,7 +956,6 @@ inline char list<char>::pop() {
 }
 
 inline Self& list<char>::prealloc(size_t size) {
-  const size_t l = len();
   if (size <= _cap)
     return self;
   if (is_owned())

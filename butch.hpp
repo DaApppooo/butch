@@ -65,8 +65,6 @@ template <class Err, class Ok>
 Result<Ok,Err> ok(Ok&& ok_) { return Result<Ok, Err>(OK, ok_); }
 template <class Ok, class Err>
 Result<Ok,Err> err(Err&& err_) { return Result<Ok, Err>(ERR, err_); }
-// #define expect(COND, OK_TYPE, ERROR_CODE) \
-//   if (!(COND)) return err<OK_TYPE>(ERROR_CODE)
 
 template <class T> using Own = T;
 template <class T> using Ref = T;
@@ -89,27 +87,25 @@ struct Unit
   uint32_t s_len;
   ctx_id reparse_ctx;
   uint16_t children_len;
-  inline uint32_t s_end() const { return s_start + s_len; }
   
-  Unit() {}
-  Unit(class_id id, uint32_t begin, uint32_t len, uint32_t children_count)
-    : s_start(begin), id(id), s_len(len), children_len(children_count),
-      reparse_ctx(NO_REPARSE) {}
-  Unit(const Unit& u)
-    : s_start(u.s_start), id(u.id), s_len(u.s_len),
-      children_len(u.children_len), reparse_ctx(NO_REPARSE) {}
-  Unit(const Unit&& u)
-    : s_start(u.s_start), id(u.id), s_len(u.s_len),
-      children_len(u.children_len), reparse_ctx(NO_REPARSE) {}
-  constexpr Unit& operator = (const Unit& u)
-  { s_start=u.s_start; id=u.id; s_len=u.s_len;
-    children_len=u.children_len;
-    reparse_ctx = u.reparse_ctx; return *this; }
-  constexpr Unit& operator = (const Unit&& u)
-  { s_start=u.s_start; id=u.id; s_len=u.s_len;
-    children_len=u.children_len;
-    reparse_ctx = u.reparse_ctx; return *this; }
+  constexpr Unit()
+    : s_start(0), id(0), s_len(0), reparse_ctx(0), children_len(0) {}
+  static constexpr Unit init(
+    class_id id,
+    uint32_t begin,
+    uint32_t len,
+    uint32_t children_count
+  ) {
+    Unit self;
+    self.s_start = begin;
+    self.id = id;
+    self.s_len = len;
+    self.children_len = children_count;
+    self.reparse_ctx = NO_REPARSE;
+    return self;
+  }
 
+  constexpr uint32_t s_end() const { return s_start + s_len; }
   View<char> str(const Parser&);
   bool is(const Parser&, const View<char> s);
 };
@@ -122,8 +118,8 @@ struct Match
   // these two fields come with (pre|post)peeping
   uint16_t u_start; // unit view begin (included)
   uint16_t u_end; // unit view end (excluded)
-  constexpr inline uint32_t s_end() { return s_start+s_len; }
-  inline View<char> s_view(const Parser&);
+  constexpr uint32_t s_end() { return s_start+s_len; }
+  View<char> s_view(const Parser&);
   bool include(Match m)
   {
     if (!m.matched)
@@ -232,35 +228,35 @@ struct Rule
 
   static constexpr uint32_t _CONTEXT  = 0b0101;
   static constexpr uint32_t _ALIAS    = 0b0011;
-  constexpr inline bool is_token() const
+  constexpr bool is_token() const
   { return _flags == _TOKEN; }
-  constexpr inline bool is_token(bool x)
+  constexpr bool is_token(bool x)
   { if (x) _flags = _TOKEN; return is_token(); }
-  constexpr inline bool has_prepeep() const
+  constexpr bool has_prepeep() const
   { return _flags & _PREPEEP && !(_flags & _TOKEN); }
-  constexpr inline bool has_prepeep(bool x)
+  constexpr bool has_prepeep(bool x)
   { if (x) _flags |= PREPEEP; return has_prepeep(); }
-  constexpr inline bool has_postpeep() const
+  constexpr bool has_postpeep() const
   { return _flags & _POSTPEEP && !(_flags & _TOKEN); }
-  constexpr inline bool has_postpeep(bool x)
+  constexpr bool has_postpeep(bool x)
   { if (x) _flags |= POSTPEEP; return has_postpeep(); }
-  constexpr inline bool has_rl_parse() const
+  constexpr bool has_rl_parse() const
   { return _flags & _RL_PARSE && !(_flags & _TOKEN); }
-  constexpr inline bool has_rl_parse(bool x)
+  constexpr bool has_rl_parse(bool x)
   { if (x) _flags |= _RL_PARSE; return has_rl_parse(); }
-  constexpr inline bool is_alias() const
+  constexpr bool is_alias() const
   { return _flags == _ALIAS; }
-  constexpr inline bool is_alias(bool x)
+  constexpr bool is_alias(bool x)
   { if (x) _flags = _ALIAS; return is_alias(); }
-  constexpr inline bool is_context() const
+  constexpr bool is_context() const
   { return _flags == _CONTEXT; }
-  constexpr inline bool is_context(bool x)
+  constexpr bool is_context(bool x)
   { if (x) _flags = _CONTEXT; return is_context(); }
-  constexpr inline bool is_unknown_context() const
+  constexpr bool is_unknown_context() const
   { return is_context() && input_len == 1; }
-  constexpr inline void set_context(ctx_id ctid)
+  constexpr void set_context(ctx_id ctid)
   { assert(is_context()); input_len = 0; ruleset_start = ctid; }
-  constexpr inline ctx_id get_context() const
+  constexpr ctx_id get_context() const
   { assert(is_context() && input_len == 0); return ruleset_start; }
   void _apply_context(
     Parser&,
@@ -400,23 +396,25 @@ struct Parser
   uint32_t flags;
   int flags_data;
 
-  Parser() :
-    butch_code(nullptr),
-    classes(),
-    rules(),
-    parsed_code(nullptr, nullptr),
-    flags(FLAG_TRIM_SPACE_LITERALS),
-    flags_data(0)
+  Parser()
   {
+    butch_code = nullptr;
+    parsed_code = View<char>::empty();
+    flags = FLAG_TRIM_SPACE_LITERALS;
+    flags_data = 0;
     rules.init(); classes.init();
     rulesets_rules.init(); rulesets_classes.init();
     regex_patterns.init();
     ctxs.init();
     buff.init();
   }
+  Parser(const Parser&) = default;
+  Parser(Parser&&) = default;
+  Parser& operator = (const Parser&) = default;
+  Parser& operator = (Parser&&) = default;
 
   static Result<Own<Parser>, Error> read(Own<char*> s);
-  static inline Result<Own<Parser>, Error> read_file(
+  static Result<Own<Parser>, Error> read_file(
     Ref<const char*> filename
   )
   { return Parser::read(_butch_read_file(filename)); }
@@ -460,11 +458,22 @@ struct Parser
   //   surround is used to add "\\b" around a regex string 
   const char* _load_str(
     View<char> s,
-    View<char> surround = View<char>(nullptr, nullptr),
-    View<char> start = View<char>(nullptr, nullptr)
+    View<char> surround = View<char>::empty(),
+    View<char> start = View<char>::empty()
   );
   // same as _load but transforms "\\n" into "\n"
   const char* _comp_str(View<char> s);
+  /*
+    On sucess:
+      returns x >= 0, x is the index in .regex_patterns of the compiled regex
+    On failure:
+      return -1 and push in the classes a special view such that:
+        it's a View<Own<char>> (you need to free the pointer in it)
+        its length is 0 (you can retrieve the acutal length via the cstr way)
+    The 'rule_output' parameter is used to distinguish Begin/End from other
+    rules.
+  */
+  int32_t _comp_rgx(const View<char> patt, rule_id rule_output);
   View<char> _rgx_match(View<char> big, const RegexPatt& pattern);
   bool _should_be_trimmed(uint32_t begin, uint32_t len);
   RulePack operator [] (int index)
@@ -495,7 +504,7 @@ struct Parser
     rulesets_rules.destroy();
     buff.destroy();
     ctxs.destroy();
-    for (int i = 0; i < regex_patterns.len(); i++)
+    for (uint32_t i = 0; i < regex_patterns.len(); i++)
     {
       regex_patterns[i].~basic_regex();
     }
@@ -505,7 +514,7 @@ struct Parser
 
 inline View<char> Match::s_view(const Parser& p)
 {
-  return View<char>(p.parsed_code.start+s_start, s_len);
+  return View<char>::range(p.parsed_code.start+s_start, s_len);
 }
 
 #undef FLAG_T

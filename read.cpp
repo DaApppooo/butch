@@ -2,7 +2,6 @@
 #include "stuff.hpp"
 #include <cctype>
 #include <cstdio>
-#include <regex>
 
 #define assume(X) do { assert(X); [[assume(X)]]; } while(false)
 
@@ -19,38 +18,29 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
 {
   char* start = s;
   const uint32_t init_len = rulesets_rules.len();
+  i32 regex_idx;
   while (*s != '\n' && *s != '#')
   {
     if (*s == '"')
     {
       start = s;
       SKIP_STRING('"')
-      _push_rc(Rule::STRING, _find_or_make_class(View(start, ++s)));
+      _push_rc(Rule::STRING, _find_or_make_class(
+        View<char>::from(start).to(++s)
+      ));
     }
     else if (*s == '\'')
     {
       start = s;
       SKIP_STRING('\'');
-      const auto pattern = View<char>(start+1, s++);
-      const View<char> surround =
-        flags & FLAG_ISOLATED_MODE_REGEX
-        ? View((char*)"\\b", 3) : View<char>(nullptr, nullptr);
-      const View<char> ld_start =
-        r.out == Rule::BEGIN || r.out == Rule::END
-        ? View((char*)"^", 1) : View<char>(nullptr, nullptr);
-      const char* const cstr_patt = _load_str(pattern, surround, ld_start);
-      regex_patterns.push_ref(RegexPatt());
-      try
+      const auto pattern = View<char>::from(start+1).to(s++);
+      regex_idx = _comp_rgx(pattern, r.out);
+      if (regex_idx < 0)
       {
-        regex_patterns[-1] = RegexPatt(cstr_patt);
+       r.out = classes.len()-1;
+       return Error::REGEX_SYNTAX_ERROR;
       }
-      catch (std::regex_error& err)
-      {
-         classes.push(View<char>((char*)err.what(), 0U));
-         r.out = classes.len()-1;
-         return Error::REGEX_SYNTAX_ERROR;
-      }
-      const View<char> v = View<char>(start, regex_patterns.len()-1);
+      const View<char> v = View<char>::range(start, regex_idx);
       classes.push(v);
       _push_rc(Rule::REGEX, classes.len()-1);
     }
@@ -76,7 +66,8 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
             s++;
           if (*s == 0 || *s == '#')
             return Error::REPARSE_SYNTAX_ERROR;
-          const class_id cid = _find_or_make_class(View<char>(start, s));
+          const class_id cid =
+            _find_or_make_class(View<char>::from(start).to(s));
           const ctx_id ctid = _find_ctx(cid);
           if (ctid == GLOBAL_CONTEXT)
             _push_rc(Rule::UNKNOWN_REPARSE, cid);
@@ -106,7 +97,8 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
           start = s;
           while (isalnum(*s) || *s == '?')
             s++;
-          const class_id cid = _find_or_make_class(View(start, s));
+          const class_id cid =
+            _find_or_make_class(View<char>::from(start).to(s));
           const rule_id rid = _find_rule(cid);
           _push_rc(rid, cid);
           break;
@@ -184,7 +176,7 @@ Parser::Error::Type _butch_ctx_change(
   ctx.rulesets_start = self.rulesets_rules.len();
   ctx.rules_start = self.rules.len();
   ctx.rule_count = 0;
-  ctx.name = self._find_or_make_class(View<char>(start, s));
+  ctx.name = self._find_or_make_class(View<char>::from(start).to(s));
   ctx.begin[0] = ctx.end[0] = Rule::UNKNOWN_RULE;
   ctx.be_count = 1;
   SKIP_SPACES_ONLY;
@@ -195,7 +187,7 @@ Parser::Error::Type _butch_ctx_change(
     start = s;
     while (isalnum(*s)) s++;
     const class_id cid
-      = self._find_or_make_class(View<char>(start, s));
+      = self._find_or_make_class(View<char>::from(start).to(s));
     const ctx_id ctxid = self._find_ctx(cid);
     if (ctxid == GLOBAL_CONTEXT
         || self.ctxs[ctxid].begin[0] == Rule::UNKNOWN_RULE
@@ -221,7 +213,7 @@ Parser::Error::Type _butch_ctx_change(
       start = s;
       while (isalnum(*s)) s++;
       const class_id cid
-        = self._find_or_make_class(View<char>(start, s));
+        = self._find_or_make_class(View<char>::from(start).to(s));
       const ctx_id rid = self._find_rule(cid);
       if (cid == Rule::BEGIN || cid == Rule::END)
         return Parser::Error::CONTEXT_SPECS_ERROR;
@@ -264,7 +256,7 @@ class_id _butch_copy_object(
     start = s;
     while (!isspace(*s))
       s++;
-    class_name = View<char>(start, s);
+    class_name = View<char>::from(start).to(s);
     const class_id cid = self._find_or_make_class(class_name);
     const ctx_id ctid = self._find_ctx(cid);
     if (ctid != GLOBAL_CONTEXT)
@@ -312,7 +304,7 @@ void _butch_ctx_rule(
     start = s;
     while (!isspace(*s))
       s++;
-    class_name = View<char>(start, s);
+    class_name = View<char>::from(start).to(s);
     const class_id cid = self._find_or_make_class(class_name);
     const ctx_id ctid = self._find_ctx(cid);
     if (ctid == GLOBAL_CONTEXT)
@@ -388,7 +380,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       start = s;
       while (isalnum(*s) || *s == '?')
         s++;
-      class_name = View<char>(start, s);
+      class_name = View<char>::from(start).to(s);
     }
     
     { // handle midway spaces, direction, then '='
@@ -470,7 +462,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     is_token = !(r.is_alias() || r.is_context() || r.has_rl_parse());
     rule_id* rids = self.rulesets_rules.data()+r.ruleset_start;
     rule_id* cids = self.rulesets_classes.data()+r.ruleset_start;
-    for (int j = 0; j < r.input_len; j++)
+    for (u32 j = 0; j < r.input_len; j++)
     {
       if (
         r.is_alias()
@@ -507,9 +499,9 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   }
 
   // Resolve contexts
-  for (uint32_t i = 0; i < self.ctxs.len(); i++)
+  for (u32 i = 0; i < self.ctxs.len(); i++)
   {
-    for (uint8_t j = 1; j < self.ctxs[i].be_count; j++)
+    for (u8 j = 1; j < self.ctxs[i].be_count; j++)
     {
       if (self.ctxs[i].begin[j] != Rule::UNKNOWN_RULE)
         continue;
@@ -614,7 +606,7 @@ void Parser::debug(FILE* f)
         fprintf(f, "%s =", classes[r.out].start);
         classes[r.out].mov(c);
       }
-      for (i = 0; i < r.input_len; i++)
+      for (i = 0; i < i32(r.input_len); i++)
       {
         if (in_rule(r, i) < 0 && in_rule(r, i) > Rule::STRING)
         {

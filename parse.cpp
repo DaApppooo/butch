@@ -27,12 +27,13 @@ bool _butch_alias_match(const Parser& p, const Rule& alias, const Unit& u)
 
 View<char> _butch_eq_iso(int i, View<char> big, View<char> pattern, bool iso)
 {
+  assert(big.len-i >= pattern.len);
   if (memcmp(big.start+i, pattern.start, pattern.len) == 0)
   {
     if (!iso)
       return {big.start+i, pattern.len};
     bool left = i == 0,
-         right = i == big.len - pattern.len - 1;
+         right = u32(i) == big.len - pattern.len - 1;
     if (!left) // ensure that no deref is done if i == 0
       left = isspace(big.start[i-1])
              || !isalnum(big.start[i-1])
@@ -44,45 +45,37 @@ View<char> _butch_eq_iso(int i, View<char> big, View<char> pattern, bool iso)
     if (left && right)
       return {big.start+i, pattern.len};
   }
-  return {nullptr, nullptr};
+  return View<char>::empty();
 }
 
 View<char> _butch_str_match(View<char> big, View<char> pattern, u8 iso)
 {
   assert(iso < 3);
   if (big.len < pattern.len)
-    return View<char>(nullptr, nullptr);
+    return View<char>::empty();
   View<char> r;
   if (iso == 2)
   {
-    if (pattern == (r = View<char>(big.start, big.start+pattern.len)))
+    if (pattern == (r = View<char>::range(big.start, pattern.len)))
       return r;
     else
-     return View<char>(nullptr, nullptr);
+     return View<char>::empty();
   }
   for (u32 i : range(0U, big.len - pattern.len))
   {
     if ((r = _butch_eq_iso(i, big, pattern, iso)).start)
       return r;
   }
-  return View<char>(nullptr, nullptr);
+  return View<char>::empty();
 }
 
 View<char> Parser::_rgx_match(View<char> big, const RegexPatt& pattern)
 {
-  constexpr View<char> failed = View<char>(nullptr, nullptr);
-  const View<char> surround = flags & FLAG_ISOLATED_MODE_REGEX
-                              ? View<char>((char*)"\\b", 2)
-                              : View<char>(nullptr, nullptr);
-  const View<char> start = flags & _FLAG_START_FIXED_MATCH
-                           ? View<char>((char*)"^", 1)
-                           : View<char>(nullptr,nullptr);
-  // const char* const cstr_patt = _load_str(pattern, surround, start);
-  // RegexPatt regex_patt(cstr_patt);
+  constexpr View<char> failed = View<char>::empty();
   RegexMatch m;
   if (std::regex_search(big.start, big.end(), m, pattern)) // std::regex_constants::nosubs
   {
-    return View<char>(m[0].first, m[0].second);
+    return View<char>::from(m[0].first).to(m[0].second);
   }
   return failed;
 }
@@ -213,9 +206,9 @@ int _butch_split_token(
   const u32 post_start = match.s_start+match.s_len;
   int offset = 0;
   out[0].s_len = pre_len;
-  out.insert(Unit(rule_idx, match.s_start, match.s_len, 0), 1);
+  out.insert(Unit::init(rule_idx, match.s_start, match.s_len, 0), 1);
   if (!p._should_be_trimmed(post_start, post_len))
-    out.insert(Unit(Unit::LITERAL, post_start, post_len, 0), 2);
+    out.insert(Unit::init(Unit::LITERAL, post_start, post_len, 0), 2);
   if (p._should_be_trimmed(out[0].s_start, pre_len))
     out.rmv(0); // TODO : optimize this rmv out
   else
@@ -244,12 +237,11 @@ void _butch_apply_context(
   const u32 units_s_start = parent->s_start;
   const u32 units_s_len = parent->s_len;
   const i32 begin_len = m.u_start;
-  const i32 end_len = m.u_end;
   const i32 head_len = i32(m.s_start) - units_s_start - begin_len;
   if (!p._should_be_trimmed(units_s_start, head_len))
   {
     assert(m.s_start - units_s_start - begin_len > 0);
-    units.insert(Unit(
+    units.insert(Unit::init(
       Unit::LITERAL,
       units_s_start,
       head_len,
@@ -265,7 +257,7 @@ void _butch_apply_context(
   parent->children_len = m.s_len > 0;
   if (m.s_len > 0)
   {
-    units.insert(Unit( // <-- the child
+    units.insert(Unit::init( // <-- the child
       Unit::LITERAL,
       m.s_start,
       m.s_len,
@@ -286,7 +278,6 @@ void _butch_apply_context(
       }
     }
     units.start--;
-    printf("++++++ %i <- %i\n", units.start, units.len);
     units[0].children_len = units.len;
     units.len++;
   }
@@ -295,7 +286,7 @@ void _butch_apply_context(
   const i32 tail_len = total_end - ctx_end;
   if (!p._should_be_trimmed(ctx_end, tail_len))
   {
-    units.insert(Unit(
+    units.insert(Unit::init(
       Unit::LITERAL,
       ctx_end,
       tail_len,
@@ -338,7 +329,6 @@ Match Rule::_match_context(
   Pack<Unit>::State state;
   Match m, sub_m, ds_m;
   list<u8> depth; // indicies in the ctx.begin and ctx.end
-  u32 ctx_content_len, abs_index;
   assert(units[0].id == Unit::LITERAL);
   assert(p.rules.atp(ctx.begin[0]).is_token());
   assert(p.rules.atp(ctx.end[0]).is_token());
@@ -354,7 +344,6 @@ Match Rule::_match_context(
       m = TOTAL_FAILURE;
       goto FAILURE;
     }
-    const u32 temp = units[0].s_start;
     do
     {
       ds_m = _butch_find_first_depth_stopper(p, units, u, ctx);
@@ -655,9 +644,9 @@ bool Parser::_should_be_trimmed(uint32_t begin, uint32_t len)
 
 i32 _butch_prev(const Pack<Unit>& units, i32 i)
 {
-  for (u32 j = 0; j < i; _next(j, units.to_view()))
+  for (u32 j = 0; i32(j) < i; _next(j, units.to_view()))
   {
-    if (j + units[j].children_len + 1 >= i)
+    if (i32(j + units[j].children_len + 1) >= i)
       return j;
   }
   return -1;
@@ -691,8 +680,6 @@ void _butch_reparse(
       out[i].id = prev;
       out[i].reparse_ctx = Unit::NO_REPARSE;
       out.ls()[out.start-1].children_len += out[i].children_len - prev_cc;
-      puts("CHANGED:");
-      _debug(p, out);
     }
   }
 }
@@ -705,15 +692,13 @@ bool Parser::_check_and_do_rule(
   Match match;
   bool did_something = false;
   const rule_id rule_idx = &r - rules.data();
-  bool test;
   auto dyn_out_iter = [&out](DynDirRange<u32>& i){ _next(i, out.to_view()); };
-  auto dyn_out_rev_iter = [&out](DynDirRange<u32>& i){ _butch_prev(out, i); };
   Pack<Unit>::State state;
 
-  char c = classes[r.out].fix();
-  printf(">>>> %s <<<<\n", classes[r.out].start);
-  classes[r.out].mov(c);
-  debug_output(stdout, out.to_view());
+  // char c = classes[r.out].fix();
+  // printf(">>>> %s <<<<\n", classes[r.out].start);
+  // classes[r.out].mov(c);
+  // debug_output(stdout, out.to_view());
 
   if (r.is_context())
   {
@@ -754,7 +739,7 @@ bool Parser::_check_and_do_rule(
         if (match.matched)
         {
           state = out.set(i, 1);
-          const int pre_off = _butch_split_token(*this, out, match, rule_idx);
+          _butch_split_token(*this, out, match, rule_idx);
           out.reset(state);
           did_something = true;
         }
@@ -769,14 +754,14 @@ bool Parser::_check_and_do_rule(
       _next(j, out.to_view());
       for (; j <= out.len; _next(j,out.to_view()))
       {
-        assert(j > i);
+        assert(i32(j) > i);
         state = out.set(i, j-i);
         match = r._sequence_match(*this, out, pt_buffer);
         out.reset(state);
         if (match.matched)
         {
           out.insert(
-            Unit(rule_idx,
+            Unit::init(rule_idx,
                  match.s_start, match.s_len,
                  match.u_end-match.u_start
             ),
@@ -806,7 +791,7 @@ bool Parser::_check_and_do_rule(
         if (match.matched)
         {
           out.insert(
-            Unit(rule_idx,
+            Unit::init(rule_idx,
                  match.s_start, match.s_len,
                  match.u_end-match.u_start
             ),
@@ -836,7 +821,7 @@ list<Unit> Parser::parse(Ref<char*> s)
   if (_should_be_trimmed(0, parsed_code.len))
     return out.ls();
 
-  out.push(Unit(Unit::LITERAL, 0, str_len(s), 0));
+  out.push(Unit::init(Unit::LITERAL, 0, str_len(s), 0));
 
   for (;;)
   {
@@ -864,10 +849,9 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
 {
   int8_t depth_pt = 0;
   int32_t depth_stack[127];
-  char c;
-  for (int i = 0; i < ls.len; i++)
+  for (u32 i = 0; i < ls.len; i++)
   {
-    for (int j = 0; j < depth_pt; j++)
+    for (i8 j = 0; j < depth_pt; j++)
       fprintf(f, "  ");
     const View<char> s =
       ls[i].id == Unit::LITERAL ? ls[i].str(*this)
@@ -876,7 +860,7 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
       fprintf(f, "(!CONTEXT_MISMATCH)");
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
-    for (int j = 0; j < s.len; j++)
+    for (u32 j = 0; j < s.len; j++)
       putc(s[j], f);
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
