@@ -209,7 +209,7 @@ size_t Parser::serialize(
   temp = callback(&flags, sizeof(flags)+sizeof(flags_data), data);
   STORE;
   // 1. compute total code length
-  size_t len = 0;
+  size_t len = 1; // last 0 byte
   for (View<char> v : classes)
   {
     if (*v.start != '\'')
@@ -218,9 +218,9 @@ size_t Parser::serialize(
       continue;
     }
 
-    s = v.start;
+    s = v.start + 1;
     while (*s != '\'' && *s != 0) s++;
-    len += s - v.start;
+    len += s - v.start + 1;
   }
   temp = callback(&len, sizeof(size_t), data);
   STORE;
@@ -239,10 +239,12 @@ size_t Parser::serialize(
     if (len != 0)
     { STORE; }
   }
+  len = 0; // add final 0 byte
+  temp = callback(&len, 1, data);
+  STORE;
   // 3. copy classes (with offsets fixed)
   temp = callback(&classes._len, length_size, data);
   STORE;
-  len = 0;
   const u32 cl_len = classes.len();
   for (u32 i = 0; i < cl_len; i++)
   {
@@ -263,17 +265,20 @@ size_t Parser::serialize(
         break;
       }
     }
-    temp = callback(&obj, sizeof(obj), data);
-    STORE;
 
     if (*v.start != '\'')
     {
+      temp = callback(&obj, sizeof(obj), data);
+      STORE;
       len += v.len;
       continue;
     }
-    s = v.start;
+    s = v.start+1;
     while (*s != '\'' && *s != 0) s++;
-    len += s - v.start;
+    obj.l = s - v.start+1;
+    len += s - v.start+1;
+    temp = callback(&obj, sizeof(obj), data);
+    STORE;
   }
   // 4. Then copy everything else in bulk
   temp = callback(&ctxs._len, length_size, data);
@@ -313,6 +318,8 @@ size_t Parser::serialize(
 
 Result<Own<Parser>, Parser::Error> Parser::deserialize_file(FILE* f)
 {
+  if (f == nullptr)
+    return err<Parser>(Error{.type=Error::DESERIALIZATION_ERROR, .offset=0});
   const auto callback = [](void* src, size_t size, void* data)
   {
     return size*fread(src, size, 1, (FILE*)data);
@@ -372,6 +379,8 @@ Result<Own<Parser>, Parser::Error> Parser::deserialize(
   // 3. copy classes (with offsets fixed)
   temp = callback(&ls_len, length_size, data);
   STORE;
+  assert(self.classes.cap() == 0);
+  assert(self.classes.data() == nullptr);
   self.classes.prealloc(ls_len);
   len = 0;
   for (i = 0; i < ls_len; i++)
@@ -381,7 +390,7 @@ Result<Own<Parser>, Parser::Error> Parser::deserialize(
     temp = callback(&obj, sizeof(obj), data);
     STORE;
 
-    const View<char> patt = View<char>::range(self.butch_code+obj.s, obj.l);
+    const auto patt = View<char>::range(self.butch_code+obj.s, obj.l);
     if (self.butch_code[obj.s] != '\'')
     {
       self.classes.push(patt);

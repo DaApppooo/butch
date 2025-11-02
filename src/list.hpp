@@ -202,10 +202,20 @@ template <class T> class list
 {
 public:
   using Self = list<T>;
+  using SerCallback = size_t(*)(const void*, size_t, void*);
+  using DeserCallback = size_t(*)(void*, size_t, void*);
   template <class U>
   using _temp_has_destroyer = decltype(std::declval<U&>().destroy());
+  template <class U>
+  using _temp_has_ser = decltype(std::declval<U&>().serialize(SerCallback(), (void*)nullptr));
+  template <class U>
+  using _temp_has_deser = decltype(U::deserialize(DeserCallback(), (void*)nullptr));
   static constexpr bool has_destroyer
       = std::experimental::is_detected_exact_v<void, _temp_has_destroyer, T>;
+  static constexpr bool has_ser
+      = std::experimental::is_detected_exact_v<size_t, _temp_has_ser, T>;
+  static constexpr bool has_deser
+      = std::experimental::is_detected_exact_v<T, _temp_has_deser, T>;
   T* _data;
   uint32_t _len;
   uint32_t _cap;
@@ -215,10 +225,16 @@ public:
   const T* cbegin() const { return _data; }
   const T* cend() const { return _data+len(); }
 
-  list();
-  list(const T*);
-  list(const list<T>& other) { memcpy(this, &other, sizeof(list<T>)); }
-  list(const list<T>&& other) { memcpy(this, &other, sizeof(list<T>)); }
+  constexpr list();
+  constexpr list(const T*);
+  constexpr list(const list<T>& other)
+  {
+    std::copy((char*)&other, sizeof(list<T>)+(char*)&other, (char*)this);
+  }
+  constexpr list(const list<T>&& other)
+  {
+    std::copy((char*)&other, sizeof(list<T>)+(char*)&other, (char*)this);
+  }
   inline Self& init();
   inline Self& push(const T element)
   { push_ref(element); return *this; }
@@ -272,19 +288,14 @@ public:
   {
     push(obj);
   }
-  // inline Self copy() const { // fuck C++
-  //   struct fake_list_char
-  //   {
-  //     char* _p;
-  //     uint32_t cap;
-  //   };
-  //   const uint32_t l = len();
-  //   fake_list_char ret;
-  //   ret._p = (char*)malloc(l);
-  //   memcpy(ret._p, _data, sizeof(char)*(l+1));
-  //   // Copying memory with length bytes.
-  //   return *(list<char>*)&ret;
-  // }
+
+  size_t serialize(size_t(*callback)(const void*, size_t, void*), void*) const;
+  static list<T> deserialize(
+    size_t(*callback)(void*, size_t, void*),
+    void*
+  );
+  constexpr bool deserialization_failed()
+  { return _len > _cap; }
 };
 
 template <class T>
@@ -341,7 +352,7 @@ struct Pack
 #define Self list<T>
 #define self (*this)
 
-GEN list<T>::list()
+GEN constexpr list<T>::list()
 {
   _data = NULL;
   _cap = 0;
@@ -415,6 +426,7 @@ GEN inline bool list<T>::is_empty() const
 GEN inline Self& list<T>::init()
 {
   _data = nullptr;
+  _len = 0;
   _cap = 0;
   return *this;
 }
@@ -424,10 +436,15 @@ GEN inline Self& list<T>::prealloc(uint32_t size)
   if (size <= _cap)
     return self;
   _cap = size;
-  _data = (T*)::realloc(
-    _data,
-    sizeof(T) * _cap
-  );
+  if (_data == nullptr)
+  {
+    _data = (T*)malloc(sizeof(T)*_cap);
+  } else {
+    _data = (T*)::realloc(
+      _data,
+      sizeof(T) * _cap
+    );
+  }
   return self;
 }
 

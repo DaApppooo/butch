@@ -1,6 +1,8 @@
 #!/bin/env python3
 from os import listdir, path, system, remove
 from sys import argv
+from json import dump
+from shlex import split
 
 def fname(s: str) -> str:
   return s.rsplit('/', 1)[1]
@@ -9,12 +11,29 @@ def chext(s: str, new: str) -> str:
 
 SRC = [f'src/{p}' for p in listdir('src') if p.endswith('.cpp')]
 OBJ = [chext(p,'.o') for p in SRC]
-FLAGS = "-Isrc"
-EXAMPLE_ARGS = "./test.butch ./test.ser"
-EXAMPLE = "examples/readser.cpp"
+FLAGS = "-I src"
+EXAMPLE_ARGS = "./test.ser"
+EXAMPLE = "examples/deser.cpp"
 EXAMPLE_BIN = 'bin/' + fname(chext(EXAMPLE,'.out'))
 EXAMPLE_CMD = f"{EXAMPLE_BIN} {EXAMPLE_ARGS}"
 SRC_ARG = ' '.join(SRC)
+cdb = [
+  {
+    'directory': path.abspath('src'),
+    'arguments': ['g++', '-c', i, '-o', chext(i,'.o'), *split(FLAGS)],
+    'file': i
+  }
+  for i in SRC
+] + [
+  {
+    'directory': path.abspath('src'),
+    'arguments': ['g++', *SRC, i, '-o', f'bin/{fname(chext(i,'.out'))}', *split(FLAGS)],
+    'file': i
+  }
+  for i in (f'examples/{j}' for j in listdir('examples'))
+]
+with open('compile_commands.json', 'w') as f:
+  dump(cdb, f)
 
 def run(cmd: str, show = True):
   if show:
