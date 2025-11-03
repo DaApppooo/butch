@@ -1,10 +1,10 @@
 #include "list.hpp"
 #include "stuff.hpp"
-#include <expected>
+#include <cstring>
 
 namespace butchgex
 {
-
+  
 struct Token
 {
   enum Type : u8
@@ -29,6 +29,12 @@ struct Token
   struct Group
   {
     using OrStartPt = u32;
+    /*
+      - empty: always matches
+      - n>=2 elements:
+        - the [1,n-1[-th elements are where the ors are in the group
+        - the n-th element is the end of the group
+    */
     list<OrStartPt> ors;
     static constexpr Group init()
     { Group self;
@@ -46,6 +52,10 @@ struct Token
   {
     using Char = u8;
     static constexpr u8 EXPAND = 0; // the dash in the [  ]
+    // Syntax:
+    // - Single matches are next to each other.
+    // - When EXPAND symbol is found, the two next characters indicate an ascii
+    //   range.
     list<Char> subranges;
     static constexpr Range init()
     { Range self;
@@ -171,7 +181,7 @@ struct Token
   
   constexpr bool is(Type t)
   { return t == type; }
-  constexpr bool match(View<char>& v);
+  constexpr bool match(const View<Token> tree, View<char>& v);
   size_t serialize(
     size_t(*cb)(const void* src, size_t size, void* data),
     void* data
@@ -216,8 +226,8 @@ struct Token
     void* data
   ) {
 #define CB(pt, size) \
-  { tmp = cb(pt, size, data); \
-    if (size && !tmp) { self.type = DESER_ERROR; return self; } \
+  { if (size && !cb(pt, size, data)) \
+    { self.type = DESER_ERROR; return self; } \
     total += tmp; }
     Token self;
     size_t tmp, total = 0;
@@ -234,21 +244,20 @@ struct Token
       case GROUP:
       case UNCAPTURED_GROUP:
       case UNCAPTURED_NOT_GROUP:
-        CB(&self._group.ors._len, sizeof(_group.ors._len));
-        CB(self._group.ors.data(), _group.ors.len()*sizeof(Group::OrStartPt));
+        self._group.ors = self._group.ors.deserialize(cb, data);
+        if (self._group.ors.deserialization_failed())
+        { self.type = DESER_ERROR; return self; }
         break;
       case RANGE:
       case NOT_RANGE:
-        CB(&_range.subranges._len, sizeof(_range.subranges._len));
-        CB(
-           _range.subranges.data(),
-           _range.subranges.len()*sizeof(Range::Char)
-        );
+        self._range.subranges = self._range.subranges.deserialize(cb, data);
+        if (self._range.subranges.deserialization_failed())
+        { self.type = DESER_ERROR; return self; }
         break;
       case DESER_ERROR:
         assert(false);
     }
-    return total;
+    return self;
   }
   void destroy()
   {
@@ -260,37 +269,28 @@ struct Token
 };
 
 // matches in normal group mode, 'uncaptured' and 'not' can be matched later
-constexpr bool match(Token::Group g, View<char>& v)
-{
-  return false;
-}
+constexpr bool match(Token::Group g, View<Token> tree, View<char>& v);
 // same for ranges here
-constexpr bool match(Token::Range g, View<char>& v)
-{
-  return false;
-}
-constexpr bool match(Token::Literal g, View<char>& v)
-{
-  return false;
-}
+constexpr bool match(Token::Range g, const View<Token> tree, View<char>& v);
+constexpr bool match(Token::Literal g, const View<Token> tree, View<char>& v);
 
 // 'NOT' is applied, but the 'UNCAPTURED' flag is not
-constexpr bool Token::match(View<char>& v)
+constexpr bool Token::match(const View<Token> tree, View<char>& v)
 {
   assert(!is(REPEAT) && !is(LAZY_REPEAT));
   switch (type)
   {
     case GROUP:
     case UNCAPTURED_GROUP:
-      return ::butchgex::match(_group, v);
+      return ::butchgex::match(_group, tree, v);
     case UNCAPTURED_NOT_GROUP:
-      return !::butchgex::match(_group, v);
+      return !::butchgex::match(_group, tree, v);
     case LITERAL:
-      return ::butchgex::match(_lit, v);
+      return ::butchgex::match(_lit, tree, v);
     case RANGE:
-      return ::butchgex::match(_range, v);
+      return ::butchgex::match(_range, tree, v);
     case NOT_RANGE:
-      return !::butchgex::match(_range, v);
+      return !::butchgex::match(_range, tree, v);
     case LAZY_REPEAT:
     case REPEAT:
     case DESER_ERROR:
@@ -301,8 +301,70 @@ constexpr bool Token::match(View<char>& v)
 
 struct Regex
 {
-  
+  list<Token> script;
 };
+
+constexpr bool match(Token::Group g, View<Token> tree, View<char>& v)
+{
+  const u32 or_c = g.ors.len();
+  if (or_c == 0)
+    return true;
+  assert(or_c > 1);
+  for (u32 i : range(or_c-1))
+  {
+    u32 pt = g.ors[i];
+    const u32 end_pt = g.ors[i+1];
+    View<char> save = v;
+    while (pt < end_pt)
+    {
+      if (tree[pt].match(tree.slice(pt, end_pt-pt), v))
+      {
+        if (tree[pt].is(Token::GROUP))
+        {
+          
+        }
+      }
+      else
+      {
+        v = save;
+        break;
+      }
+    }
+    if (pt >= end_pt)
+      return true;
+  }
+  return false;
+}
+
+constexpr bool match(Token::Range g, const View<Token> tree, View<char>& v)
+{
+  assert(v.len > 0);
+  const u32 l = g.subranges.len();
+  for (u32 i = 0; i < l; i++)
+  {
+    if (g.subranges[i] == Token::Range::EXPAND)
+    {
+      assert(i < l-2);
+      if (v[0] < g.subranges[i+1] || v[0] > g.subranges[i+2])
+        return false;
+      i+=2;
+    }
+    else if (v[0] != g.subranges[i])
+      return false;
+  }
+  return true;
+}
+
+constexpr bool match(Token::Literal g, const View<Token> tree, View<char>& v)
+{
+  const u32 l = strnlen((const char*)g, sizeof(Token::Literal));
+  if (v.len < l)
+    return false;
+  if (memcmp(v.start, g, l))
+    return false;
+  v.step(l);
+  return true;
+}
 
 }
 

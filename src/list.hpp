@@ -145,6 +145,8 @@ struct View
   { return View<T>(start+start_off, len-start_off-end_off); }
   View<T> slice(int sub_start, int sub_len) const
   { return View<T>(start+sub_start, sub_len); }
+  constexpr void step(int step_count)
+  { assert(step_count <= len); start += step_count; len -= step_count; }
   constexpr inline View<T>& operator ++ () { start++; len--; return *this; }
   constexpr inline T& operator * () const { return *start; }
   constexpr inline View<T> begin() const { return *this; }
@@ -176,6 +178,8 @@ struct View<char>
   View<char>& to(char* end)
   { len = end - start; return *this; }
 
+  constexpr void step(int step_count)
+  { assert(step_count <= len); start += step_count; len -= step_count; }
   char* end() { return start + len; }
   char& operator [] (int index) const
   { if (index < 0) index += len; return start[index]; }
@@ -220,10 +224,10 @@ public:
   uint32_t _len;
   uint32_t _cap;
 
-  T* begin() const { return _data; }
-  T* end() const { return _data+len(); }
-  const T* cbegin() const { return _data; }
-  const T* cend() const { return _data+len(); }
+  constexpr T* begin() const { return _data; }
+  constexpr T* end() const { return _data+len(); }
+  constexpr const T* cbegin() const { return _data; }
+  constexpr const T* cend() const { return _data+len(); }
 
   constexpr list();
   constexpr list(const T*);
@@ -251,7 +255,7 @@ public:
   inline void destroy();
   inline Self copy() const;
   inline Self& rmv(int index);
-  inline View<T> to_view() const;
+  constexpr View<T> to_view() const;
   inline Pack<T> to_pack() const;
   inline View<T> slice(int start, int len) const;
   Self& rmv(int start, int end);
@@ -274,7 +278,7 @@ public:
   inline Self& own(list<T>& other);
 
   inline T* data() const;
-  inline uint32_t len() const;
+  constexpr uint32_t len() const;
   inline uint32_t cap() const;
 
   // len == 0
@@ -371,7 +375,7 @@ GEN inline T& list<T>::atn(const int index, const uint32_t len) const
   return _data[len + index];
 }
 
-GEN inline uint32_t list<T>::len() const
+GEN constexpr uint32_t list<T>::len() const
 {
   if (_data == nullptr)
     return 0;
@@ -614,7 +618,7 @@ GEN Self& list<T>::rmv(int start, int end)
 }
 
 
-GEN inline View<T> list<T>::to_view() const
+GEN constexpr View<T> list<T>::to_view() const
 {
   return View<T>::range(_data, len());
 }
