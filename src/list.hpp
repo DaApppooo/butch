@@ -145,7 +145,7 @@ struct View
   { return View<T>(start+start_off, len-start_off-end_off); }
   View<T> slice(int sub_start, int sub_len) const
   { return View<T>(start+sub_start, sub_len); }
-  constexpr void step(int step_count)
+  constexpr void eat(int step_count)
   { assert(step_count <= len); start += step_count; len -= step_count; }
   constexpr inline View<T>& operator ++ () { start++; len--; return *this; }
   constexpr inline T& operator * () const { return *start; }
@@ -178,9 +178,12 @@ struct View<char>
   View<char>& to(char* end)
   { len = end - start; return *this; }
 
-  constexpr void step(int step_count)
+  constexpr void eat(int step_count)
   { assert(step_count <= len); start += step_count; len -= step_count; }
+  char* begin() { return start; }
   char* end() { return start + len; }
+  View<char>& set_end(char* end_)
+  { len = end_ - start; return *this; }
   char& operator [] (int index) const
   { if (index < 0) index += len; return start[index]; }
   constexpr inline bool operator == (const View<char>& v)

@@ -4,7 +4,7 @@
 
 namespace butchgex
 {
-  
+
 struct Token
 {
   enum Type : u8
@@ -178,8 +178,44 @@ struct Token
     t._range = Range::init();
     return t;
   }
-  
-  constexpr bool is(Type t)
+
+  constexpr bool is_group() const
+  {
+    return type == GROUP
+           || type == UNCAPTURED_GROUP
+           || type == UNCAPTURED_NOT_GROUP;
+  }
+  constexpr bool is_uncaptured_group() const
+  {
+    return type == UNCAPTURED_GROUP
+           || type == UNCAPTURED_NOT_GROUP;
+  }
+  constexpr bool is_repeat() const
+  {
+    return type == REPEAT
+           || type == LAZY_REPEAT;
+  }
+  constexpr bool is_range() const
+  {
+    return type == RANGE
+           || type == NOT_RANGE;
+  }
+  constexpr Group::OrStartPt group_end() const
+  {
+    assert(is_group());
+    return _group.ors[-1];
+  }
+  constexpr u32 min() const
+  {
+    assert(is_repeat());
+    return _repeat.min;
+  }
+  constexpr u32 max() const
+  {
+    assert(is_repeat());
+    return _repeat.max;
+  }
+  constexpr bool is(Type t) const
   { return t == type; }
   constexpr bool match(const View<Token> tree, View<char>& v);
   size_t serialize(
@@ -261,14 +297,22 @@ struct Token
   }
   void destroy()
   {
-    if (is(GROUP) || is(UNCAPTURED_GROUP) || is(UNCAPTURED_NOT_GROUP))
+    if (is_group())
       _group.ors.destroy();
-    if (is(RANGE) || is(NOT_RANGE))
+    if (is_range())
       _range.subranges.destroy();
   }
 };
 
 // matches in normal group mode, 'uncaptured' and 'not' can be matched later
+/*
+  Iters through every section of the group separated by a '|'.
+  Returns wether at least one section matched and outputs
+  in v the matched string (excluding uncaptured start and end if present).
+  Note that this behavior is different from other 'match' functions where
+  characters from v are consumed if there's a match. This requires special
+  handling when facing a group.
+*/
 constexpr bool match(Token::Group g, View<Token> tree, View<char>& v);
 // same for ranges here
 constexpr bool match(Token::Range g, const View<Token> tree, View<char>& v);
@@ -304,6 +348,41 @@ struct Regex
   list<Token> script;
 };
 
+// Returns true on failure
+constexpr bool _unit_match(
+  u32& pt,
+  const u32 end_pt,
+  View<Token> tree,
+  const View<char> save,
+  View<char>& v,
+  View<char>& str_match
+) {
+  if (tree[pt].match(tree.slice(pt, end_pt-pt), v))
+  {
+    if (tree[pt].is_group())
+    {
+      pt = tree[pt].group_end();
+      v.start = v.end();
+    }
+    if (tree[pt].is_uncaptured_group())
+    {
+      if (str_match.start == save.start)
+        str_match.start = v.start;
+      else
+        str_match.set_end(v.start);
+    }
+    return false;
+  }
+  else
+  {
+    v = save;
+    return true;
+  }
+}
+
+/*
+*/
+
 constexpr bool match(Token::Group g, View<Token> tree, View<char>& v)
 {
   const u32 or_c = g.ors.len();
@@ -315,23 +394,50 @@ constexpr bool match(Token::Group g, View<Token> tree, View<char>& v)
     u32 pt = g.ors[i];
     const u32 end_pt = g.ors[i+1];
     View<char> save = v;
+    View<char> str_match = save;
     while (pt < end_pt)
     {
-      if (tree[pt].match(tree.slice(pt, end_pt-pt), v))
+      if (tree[pt].is(Token::REPEAT))
       {
-        if (tree[pt].is(Token::GROUP))
+        const Token& repeat = tree[pt];
+        pt++;
+        u32 reps = 0, temp_pt = pt;
+        while (!_unit_match(temp_pt, end_pt, tree, save, v, str_match))
         {
-          
+          reps++;
+          if (repeat.max() && reps > repeat.max())
+            break;
+          temp_pt = pt;
         }
+        if (reps < repeat.min())
+          break;
       }
-      else
+      else if (tree[pt].is(Token::LAZY_REPEAT))
       {
-        v = save;
-        break;
+        const Token& repeat = tree[pt];
+        pt++;
+        u32 reps = 0, temp_pt = 0;
+        for (; reps < repeat.min(); reps++)
+        {
+          temp_pt = pt;
+          if (!_unit_match(temp_pt, end_pt, tree, save, v, str_match))
+            break;
+        }
+        if (reps < repeat.min())
+          break;
+        assert()
       }
+      else if (!_unit_match(pt, end_pt, tree, save, v, str_match))
+        break;
+      pt++;
     }
     if (pt >= end_pt)
+    {
+      if (str_match.end() == save.end())
+        str_match.set_end(v.start);
+      v = str_match;
       return true;
+    }
   }
   return false;
 }
@@ -362,7 +468,7 @@ constexpr bool match(Token::Literal g, const View<Token> tree, View<char>& v)
     return false;
   if (memcmp(v.start, g, l))
     return false;
-  v.step(l);
+  v.eat(l);
   return true;
 }
 
