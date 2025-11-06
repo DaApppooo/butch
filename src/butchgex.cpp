@@ -5,6 +5,18 @@
 namespace butchgex
 {
 
+/*
+
+literal 'b'
+repeat{0,inf} -lazy
+  range 'a'
+literal 'b'
+
+bhello worldb
+
+*/
+
+  
 struct Token
 {
   enum Type : u8
@@ -66,9 +78,10 @@ struct Token
     Encodes:
       - Star: 'x*'
       - Plus: 'x+'
+      - Question mark: 'x?'
       - Explicit repeats: '(hello){5,9}'
 
-    Note: The token must be placed before what is repeated
+    Note: The token must be placed before what is repeated.
   */
   struct Repeat
   {
@@ -364,6 +377,8 @@ constexpr bool _unit_match(
       pt = tree[pt].group_end();
       v.start = v.end();
     }
+    else
+      pt++;
     if (tree[pt].is_uncaptured_group())
     {
       if (str_match.start == save.start)
@@ -401,31 +416,51 @@ constexpr bool match(Token::Group g, View<Token> tree, View<char>& v)
       {
         const Token& repeat = tree[pt];
         pt++;
-        u32 reps = 0, temp_pt = pt;
+        u32 reps = 0, temp_pt = pt, last_pt = pt+1;
         while (!_unit_match(temp_pt, end_pt, tree, save, v, str_match))
         {
           reps++;
           if (repeat.max() && reps > repeat.max())
             break;
+          last_pt = temp_pt;
           temp_pt = pt;
         }
         if (reps < repeat.min())
           break;
+        pt = last_pt;
       }
       else if (tree[pt].is(Token::LAZY_REPEAT))
       {
         const Token& repeat = tree[pt];
         pt++;
-        u32 reps = 0, temp_pt = 0;
+        const u32 init_pt = pt;
+        u32 reps = 0, temp_pt = 0, last_pt = pt+1;
         for (; reps < repeat.min(); reps++)
         {
           temp_pt = pt;
           if (!_unit_match(temp_pt, end_pt, tree, save, v, str_match))
             break;
+          last_pt = temp_pt;
         }
         if (reps < repeat.min())
           break;
-        assert()
+        pt = last_pt;
+        assert(!tree[pt].is_repeat());
+        temp_pt = pt;
+        while (!_unit_match(temp_pt, end_pt, tree, save, v, str_match))
+        {
+          temp_pt = init_pt;
+          if (!_unit_match(temp_pt, end_pt, tree, save, v, str_match))
+          {
+            reps = 0;
+          }
+          reps++;
+          temp_pt = pt;
+          if (repeat.max() && reps > repeat.max())
+            break;
+        }
+        if (reps == 0 || repeat.max() && reps > repeat.max())
+          break;
       }
       else if (!_unit_match(pt, end_pt, tree, save, v, str_match))
         break;
