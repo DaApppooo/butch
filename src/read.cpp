@@ -278,7 +278,10 @@ class_id _butch_copy_object(
     {
       const rule_id rid = self._find_rule(cid);
       if (rid == Rule::UNKNOWN_RULE)
-        return cid;
+      {
+        self.rules.push(Rule::init_unknown_copy(cid));
+        return -1;
+      }
       if (!self.rules[rid].is_alias())
       {
         const Rule r = self.rules[rid];
@@ -435,9 +438,59 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
 
   // resolve rules with Rule.in_rule(x) == UNKNOWN_RULE
   bool is_token;
+  Context* cctx_p = nullptr;
+  u32 ctx_rulestart_offset = 0;
   for (uint32_t i = 0; i < self.rules.len(); i++)
   {
     Rule& r = self.rules[i];
+    if (cctx_p == nullptr)
+    {
+      if (self.ctxs.len() > 0
+          && cctx_p == nullptr
+          && i >= self.ctxs[0].rules_start+ctx_rulestart_offset)
+      {
+        cctx_p = &self.ctxs[0];
+        cctx_p->rules_start += ctx_rulestart_offset;
+      }
+    }
+    else if (
+       cctx_p+1 < self.ctxs.end()
+    && i >= cctx_p[1].rules_start+ctx_rulestart_offset
+    ) {
+      cctx_p++;
+      cctx_p->rules_start += ctx_rulestart_offset;
+    }
+    if (r.is_unknown_copy())
+    {
+      const ctx_id ctid = self._find_ctx(r.out);
+      if (ctid != GLOBAL_CONTEXT)
+      {
+        const Context& ctx = self.ctxs[ctid];
+        const u32 ie = ctx.rules_start+ctx.rule_count;
+        for (u32 j = ctx.rules_start; j < ie; j++)
+        {
+          if (self.rules[j].out > 0 && !self.rules[j].is_alias())
+          {
+            if (r.is_unknown_copy())
+            {
+              r = self.rules[j];
+            } else {
+              self.rules.insert(self.rules[j], i+j);
+              ctx_rulestart_offset++;
+              if (cctx_p)
+                cctx_p->rule_count++;
+            }
+          }
+        }
+      }
+      else
+      {
+        const rule_id rid = self._find_rule(r.out);
+        if (rid == Rule::UNKNOWN_RULE)
+          ERROR_CN(Error::UNDECLARED_RULE, r.out);
+        r = self.rules[rid];
+      }
+    }
     if (r.input_len == 0)
       continue;
     if (self.in_rule(r, 0) == Rule::PLUS)

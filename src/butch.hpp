@@ -219,15 +219,23 @@ struct Rule
     self.out = cid;
     return self;
   }
+  static Rule init_unknown_copy(class_id out)
+  {
+    Rule self;
+    self._flags = _UNKNOWN_COPY;
+    self.out = out;
+    return self;
+  }
 
-  static constexpr uint32_t _TOKEN    = 0b0001;
-  static constexpr uint32_t _PREPEEP  = 0b0010;
-  static constexpr uint32_t _POSTPEEP = 0b0100;
-  static constexpr uint32_t _TWOPEEP  = 0b0110;
-  static constexpr uint32_t _RL_PARSE = 0b1000;
+  static constexpr uint32_t _TOKEN        = 0b0001;
+  static constexpr uint32_t _PREPEEP      = 0b0010;
+  static constexpr uint32_t _POSTPEEP     = 0b0100;
+  static constexpr uint32_t _TWOPEEP      = 0b0110;
+  static constexpr uint32_t _RL_PARSE     = 0b1000;
 
-  static constexpr uint32_t _CONTEXT  = 0b0101;
-  static constexpr uint32_t _ALIAS    = 0b0011;
+  static constexpr uint32_t _CONTEXT      = 0b0101;
+  static constexpr uint32_t _ALIAS        = 0b0011;
+  static constexpr uint32_t _UNKNOWN_COPY = 0b1011;
   constexpr bool is_token() const
   { return _flags == _TOKEN; }
   constexpr bool is_token(bool x)
@@ -248,6 +256,8 @@ struct Rule
   { return _flags == _ALIAS; }
   constexpr bool is_alias(bool x)
   { if (x) _flags = _ALIAS; return is_alias(); }
+  constexpr bool is_unknown_copy() const
+  { return _flags == _UNKNOWN_COPY; }
   constexpr bool is_context() const
   { return _flags == _CONTEXT; }
   constexpr bool is_context(bool x)
