@@ -246,7 +246,8 @@ class_id _butch_copy_object(
       if (self.rules[i].is_alias())
         continue;
       self.rules.push(self.rules[i]);
-      self.ctxs[cctx].rule_count++;
+      if (cctx >= 0)
+        self.ctxs[cctx].rule_count++;
     }
   }
   do
@@ -268,7 +269,8 @@ class_id _butch_copy_object(
         if (self.rules[i].out > 0 && !self.rules[i].is_alias())
         {
           self.rules.push(self.rules[i]);
-          self.ctxs[cctx].rule_count++;
+          if (cctx >= 0)
+            self.ctxs[cctx].rule_count++;
         }
       }
     }
@@ -281,7 +283,8 @@ class_id _butch_copy_object(
       {
         const Rule r = self.rules[rid];
         self.rules.push(r);
-        self.ctxs[cctx].rule_count++;
+        if (cctx >= 0)
+          self.ctxs[cctx].rule_count++;
       }
     }
     SKIP_SPACES_ONLY;
@@ -357,15 +360,6 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     }
     else if (*s == '+')
     {
-      if (cctx == GLOBAL_CONTEXT)
-      {
-        const u32 offset = s - self.butch_code;
-        self.destroy();
-        return err<Parser>(Error{
-          .type=Error::MISPLACED_COPY,
-          .offset=offset
-        });
-      }
       if ((cid = _butch_copy_object(self, s, start, cctx)) >= 0)
         ERROR_CN(Error::UNDECLARED_RULE, cid);
       continue;
