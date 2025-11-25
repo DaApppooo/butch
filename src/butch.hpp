@@ -385,7 +385,7 @@ struct Parser
     } type;
     union { uint32_t offset; Own<char*> name; };
     constexpr bool owns_name() const
-    { return type >= UNDECLARED_CONTEXT; }
+    { return type >= UNDECLARED_RULE; }
   };
   struct FileParse
   {
