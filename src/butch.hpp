@@ -106,8 +106,8 @@ struct Unit
   }
 
   constexpr uint32_t s_end() const { return s_start + s_len; }
-  View<char> str(const Parser&);
-  bool is(const Parser&, const View<char> s);
+  _butch_utils::View<char> str(const Parser&);
+  bool is(const Parser&, const _butch_utils::View<char> s);
 };
 
 struct Match
@@ -119,7 +119,7 @@ struct Match
   uint16_t u_start; // unit view begin (included)
   uint16_t u_end; // unit view end (excluded)
   constexpr uint32_t s_end() { return s_start+s_len; }
-  View<char> s_view(const Parser&);
+  _butch_utils::View<char> s_view(const Parser&);
   bool include(Match m)
   {
     if (!m.matched)
@@ -270,32 +270,32 @@ struct Rule
   { assert(is_context() && input_len == 0); return ruleset_start; }
   void _apply_context(
     Parser&,
-    Pack<Unit>&,
-    list<Rule::Pt>&,
+    _butch_utils::Pack<Unit>&,
+    _butch_utils::list<Rule::Pt>&,
     Match m
   );
 
   Match _sequence_match(
     Parser&,
-    Pack<Unit>&,
-    list<Pt>&
+    _butch_utils::Pack<Unit>&,
+    _butch_utils::list<Pt>&
   );
   Match _match_str(
     const Parser&,
-    View<Unit>,
-    list<Pt>&,
+    _butch_utils::View<Unit>,
+    _butch_utils::list<Pt>&,
     const class_id
   );
   Match _match_rgx(
     Parser&,
-    View<Unit>,
-    list<Pt>&,
+    _butch_utils::View<Unit>,
+    _butch_utils::list<Pt>&,
     const class_id
   );
   Match _match_context(
     Parser& p,
-    Pack<Unit>& units,
-    list<Rule::Pt>& u
+    _butch_utils::Pack<Unit>& units,
+    _butch_utils::list<Rule::Pt>& u
   );
 };
 
@@ -318,7 +318,7 @@ struct Context
 };
 
 Own<char*> _butch_read_file(Ref<const char*> filename);
-Own<char*> _butch_allocpy_view(const View<char> v);
+Own<char*> _butch_allocpy_view(const _butch_utils::View<char> v);
 bool _butch_alias_match(
   const Parser& p,
   const Rule& alias,
@@ -333,12 +333,12 @@ Create with (both return a valid Parser structure):
     : open, read and calls Parser::read.
 Use the parser to parse your custom language with:
   Parser.parse(Ref<char*> code)
-    : Returns a tree with a linear layout in memoy in a list (eqv.
+    : Returns a tree with a linear layout in memoy in a _butch_utils::list (eqv.
       std::vector). Each node is a 'Unit', and has Unit.child_count elements.
   Parser.parse_file(Ref<const char*> filename)
     : Returns a Parser::FileParse containing a string with the content of the
       opened file (can be used to retrieve the content of tokens for example),
-      and the list tree as explained with Parser.parse
+      and the _butch_utils::list tree as explained with Parser.parse
 */
 struct Parser
 {
@@ -390,28 +390,28 @@ struct Parser
   struct FileParse
   {
     Own<char*> parsed_code;
-    Own<list<Unit>> units;
+    Own<_butch_utils::list<Unit>> units;
   };
   struct RulePack
-  { View<char> class_name; Rule rule; };
+  { _butch_utils::View<char> class_name; Rule rule; };
   Own<char*> butch_code;
-  list<Context> ctxs;
-  list<Rule> rules;
-  list<View<char>> classes;
+  _butch_utils::list<Context> ctxs;
+  _butch_utils::list<Rule> rules;
+  _butch_utils::list<_butch_utils::View<char>> classes;
   // these two are read linearly when testing every rule, so it's faster
   // to sequence then in memory
-  list<rule_id> rulesets_rules; // TODO: use same cap and length data for both
-  list<class_id> rulesets_classes;
-  list<RegexPatt> regex_patterns;
-  string buff;
-  View<char> parsed_code;
+  _butch_utils::list<rule_id> rulesets_rules; // TODO: use same cap and length data for both
+  _butch_utils::list<class_id> rulesets_classes;
+  _butch_utils::list<RegexPatt> regex_patterns;
+  _butch_utils::string buff;
+  _butch_utils::View<char> parsed_code;
   uint32_t flags;
   int flags_data;
 
   Parser()
   {
     butch_code = nullptr;
-    parsed_code = View<char>::empty();
+    parsed_code = _butch_utils::View<char>::empty();
     flags = FLAG_TRIM_SPACE_LITERALS;
     flags_data = 0;
     rules.init(); classes.init();
@@ -443,14 +443,14 @@ struct Parser
   );
 
   void debug(FILE* f);
-  void debug_output(FILE* f, const View<Unit> ls);
-  Own<list<Unit>> parse(Ref<char*> s);
+  void debug_output(FILE* f, const _butch_utils::View<Unit> ls);
+  Own<_butch_utils::list<Unit>> parse(Ref<char*> s);
   FileParse parse_file(Ref<const char*> filename)
   {
     char* code = _butch_read_file(filename);
     if (code == nullptr)
     {
-      list<Unit> err;
+      _butch_utils::list<Unit> err;
       err.init();
       return {nullptr, err};
     }
@@ -458,35 +458,35 @@ struct Parser
     return {code, ret};
   }
   Error::Type _make_rule(Rule& r, Ref<char*>& s);
-  class_id _find_or_make_class(View<char>);
+  class_id _find_or_make_class(_butch_utils::View<char>);
   rule_id _find_rule(class_id);
   ctx_id _find_ctx(class_id);
   bool _check_and_do_rule(
     Rule& r,
-    Pack<Unit>& out,
-    list<Rule::Pt>& pt_buffer
+    _butch_utils::Pack<Unit>& out,
+    _butch_utils::list<Rule::Pt>& pt_buffer
   );
   // just loads [s.start, s.start+s.len[ U {0} into buff
   //   surround is used to add "\\b" around a regex string 
   const char* _load_str(
-    View<char> s,
-    View<char> surround = View<char>::empty(),
-    View<char> start = View<char>::empty()
+    _butch_utils::View<char> s,
+    _butch_utils::View<char> surround = _butch_utils::View<char>::empty(),
+    _butch_utils::View<char> start = _butch_utils::View<char>::empty()
   );
   // same as _load but transforms "\\n" into "\n"
-  const char* _comp_str(View<char> s);
+  const char* _comp_str(_butch_utils::View<char> s);
   /*
     On sucess:
       returns x >= 0, x is the index in .regex_patterns of the compiled regex
     On failure:
       return -1 and push in the classes a special view such that:
-        it's a View<Own<char>> (you need to free the pointer in it)
+        it's a _butch_utils::View<Own<char>> (you need to free the pointer in it)
         its length is 0 (you can retrieve the acutal length via the cstr way)
     The 'rule_output' parameter is used to distinguish Begin/End from other
     rules.
   */
-  int32_t _comp_rgx(const View<char> patt, rule_id rule_output);
-  View<char> _rgx_match(View<char> big, const RegexPatt& pattern);
+  int32_t _comp_rgx(const _butch_utils::View<char> patt, rule_id rule_output);
+  _butch_utils::View<char> _rgx_match(_butch_utils::View<char> big, const RegexPatt& pattern);
   bool _should_be_trimmed(uint32_t begin, uint32_t len);
   RulePack operator [] (int index)
   { return {classes[index], rules[index]}; }
@@ -524,9 +524,9 @@ struct Parser
   }
 };
 
-inline View<char> Match::s_view(const Parser& p)
+inline _butch_utils::View<char> Match::s_view(const Parser& p)
 {
-  return View<char>::range(p.parsed_code.start+s_start, s_len);
+  return _butch_utils::View<char>::range(p.parsed_code.start+s_start, s_len);
 }
 
 #undef FLAG_T

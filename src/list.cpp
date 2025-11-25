@@ -1,5 +1,5 @@
 #include "list.hpp"
-
+using namespace _butch_utils;
 
 list<char> list<char>::copy() const {
 	const size_t _len = len();

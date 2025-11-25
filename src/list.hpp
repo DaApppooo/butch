@@ -12,17 +12,19 @@
 #include <experimental/type_traits>
 #include <initializer_list>
 #include <utility>
+#include <cstdio>
 #ifdef FILE_DIALOG
 #include "raylib.h"
 #endif
 // #define DEBUG
 #ifdef DEBUG
-#include <cstdio>
 #define assertm(COND, ...) if (!(COND)) { fprintf(stderr, __VA_ARGS__); assert(COND); }
 #else
 #define assertm(COND, ...)
 #endif
 
+namespace _butch_utils
+{
 
 template <class InitIterator, class Output>
 struct TreeIter
@@ -799,7 +801,6 @@ GEN inline Self operator + (const Self a, const T&& obj)
 #undef Self
 #undef self
 
-#include <cstdio>
 // NOTE - Using abreviation: Ld0 <=> Leading zero
 // NOTE - For strings,
 //  the len is stored the C-string way, not in a preceding block (to the content of the array)
@@ -1046,10 +1047,12 @@ inline bool operator != (string a, string b)
 {
   return !(a == b);
 }
+} // _butch_utils
 
 #undef Self
 #undef self
 
 #endif /* H_LIST */
+
 
 

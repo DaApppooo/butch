@@ -1,11 +1,11 @@
 #include "butch.hpp"
 #include "list.hpp"
 #include <cstdio>
-#include <functional>
 // #include <regex.h>
 #include <regex>
 #include <cctype>
 #include "stuff.hpp"
+using namespace _butch_utils;
 
 #define expect(X) do { assert(X); [[assume(X)]]; } while(false)
 

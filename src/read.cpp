@@ -2,6 +2,7 @@
 #include "stuff.hpp"
 #include <cctype>
 #include <cstdio>
+using namespace _butch_utils;
 
 #define assume(X) do { assert(X); [[assume(X)]]; } while(false)
 

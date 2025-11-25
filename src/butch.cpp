@@ -6,6 +6,7 @@
 #include "list.hpp"
 #include "stuff.hpp"
 #include "butch.hpp"
+using namespace _butch_utils;
 
 #define expect(X) do { assert(X); [[assume(X)]]; } while(false)
 #define ALIAS_CHAR '?'
