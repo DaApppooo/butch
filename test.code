@@ -1,4 +1,15 @@
 
-int main(int argc, string_array argv)
+set test 1
+set subtest 1
+if test
+{
+  say "test passed"
+}
+set temp test
+and temp subtest
+if temp
+{
+  say "test and subtest"
+}
 
 

@@ -719,7 +719,7 @@ bool Parser::_check_and_do_rule(
             match
           );
           did_something = true;
-          i += out.len;
+          i += out.len-1;
         }
         out.reset(state);
       }

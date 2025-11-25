@@ -12,8 +12,8 @@ def chext(s: str, new: str) -> str:
 SRC = [f'src/{p}' for p in listdir('src') if p.endswith('.cpp')]
 OBJ = [chext(p,'.o') for p in SRC]
 FLAGS = "-I src"
-EXAMPLE_ARGS = "./test.ser"
-EXAMPLE = "examples/deser.cpp"
+EXAMPLE_ARGS = "./test.butch ./test.code"
+EXAMPLE = "examples/readparse.cpp"
 EXAMPLE_BIN = 'bin/' + fname(chext(EXAMPLE,'.out'))
 EXAMPLE_CMD = f"{EXAMPLE_BIN} {EXAMPLE_ARGS}"
 SRC_ARG = ' '.join(SRC)
