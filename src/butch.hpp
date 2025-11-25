@@ -107,7 +107,9 @@ struct Unit
 
   constexpr uint32_t s_end() const { return s_start + s_len; }
   _butch_utils::View<char> str(const Parser&);
-  bool is(const Parser&, const _butch_utils::View<char> s);
+  bool is(const Parser&, const _butch_utils::View<const char> s);
+  bool is(const Parser& p, const char* s)
+  { return is(p, _butch_utils::View<const char>::range(s, _butch_utils::str_len(s))); }
 };
 
 struct Match

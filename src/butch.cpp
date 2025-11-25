@@ -39,15 +39,16 @@ View<char> Unit::str(const Parser& p)
   return View<char>::range(p.parsed_code.start+s_start, s_len);
 }
 
-bool Unit::is(const Parser& p, const View<char> s)
+bool Unit::is(const Parser& p, const View<const char> s)
 {
+  const View<char> alt = { (char*)s.start, s.len };
   if (s.start == nullptr) return false;
   if (id == LITERAL) return false;
   Rule* r = nullptr;
   rule_id rid;
   for (u32 i = 0; i < p.rules.len(); i++)
   {
-    if (p.classes[p.rules[i].out] == s)
+    if (p.classes[p.rules[i].out] == alt)
     { r = p.rules.data() + i; rid = i; break; }
   }
   if (!r) return false;
