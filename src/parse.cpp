@@ -702,7 +702,7 @@ bool Parser::_check_and_do_rule(
 
   if (r.is_context())
   {
-    for (u32 i : out.dyn_range().iter_with(dyn_out_iter))
+    for (u32 i = 0; i < out.len; _next(i, out.to_view()))
     {
       if (out[i].id == Unit::LITERAL)
       {
@@ -719,6 +719,7 @@ bool Parser::_check_and_do_rule(
             match
           );
           did_something = true;
+          i += out.len;
         }
         out.reset(state);
       }
