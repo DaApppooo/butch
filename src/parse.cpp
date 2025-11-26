@@ -268,13 +268,16 @@ void _butch_apply_context(
     while (common_malcom_do_somethin)
     {
       common_malcom_do_somethin = false;
+      u32 i = 0;
       for (Rule& r : p.rules.slice(ctx.rules_start, ctx.rule_count))
       {
         if (r.out == Rule::BEGIN || r.out == Rule::END)
-         continue;
+        { i++; continue; }
+        printf("Sub-check rule %i\n", i+ctx.rules_start);
         common_malcom_do_somethin =
           p._check_and_do_rule(r, units, u)
           || common_malcom_do_somethin;
+        i++;
       }
     }
     units.start--;
@@ -810,7 +813,7 @@ bool Parser::_check_and_do_rule(
   return did_something;
 }
 
-list<Unit> Parser::parse(Ref<char*> s)
+Parser::Output Parser::parse(Ref<char*> s)
 {
   Pack<Unit> out;
   list<Rule::Pt> pt_buffer;
@@ -819,7 +822,7 @@ list<Unit> Parser::parse(Ref<char*> s)
   parsed_code = {s, (u32)str_len(s)};
 
   if (_should_be_trimmed(0, parsed_code.len))
-    return out.ls();
+    return { out.data(), out.len };
 
   out.push(Unit::init(Unit::LITERAL, 0, str_len(s), 0));
 
@@ -841,7 +844,7 @@ list<Unit> Parser::parse(Ref<char*> s)
 
   pt_buffer.destroy();
 
-  return out.ls();
+  return {out.data(), out.len};
 }
 
 

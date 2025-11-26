@@ -180,8 +180,10 @@ struct View<char>
   View<char>& to(char* end)
   { len = end - start; return *this; }
 
+  constexpr View<const char> to_const() const
+  { return { start, len }; }
   constexpr void eat(int step_count)
-  { assert(step_count <= len); start += step_count; len -= step_count; }
+  { assert(uint32_t(step_count) <= len); start += step_count; len -= step_count; }
   char* begin() { return start; }
   char* end() { return start + len; }
   View<char>& set_end(char* end_)
@@ -316,7 +318,7 @@ struct Pack
   uint32_t start;
   uint32_t len;
   void init() { _data.init(); start = len = 0; }
-  T* data() {  _data.data() + start; }
+  T* data() { return _data.data() + start; }
   T& operator [] (uint32_t index) const
   { return _data.atp(start+index); }
   T& operator [] (uint32_t index)

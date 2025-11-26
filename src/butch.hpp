@@ -107,9 +107,11 @@ struct Unit
 
   constexpr uint32_t s_end() const { return s_start + s_len; }
   _butch_utils::View<char> str(const Parser&);
-  bool is(const Parser&, const _butch_utils::View<const char> s);
-  bool is(const Parser& p, const char* s)
+  bool is(const Parser&, const _butch_utils::View<const char> s) const;
+  bool is(const Parser& p, const char* s) const
   { return is(p, _butch_utils::View<const char>::range(s, _butch_utils::str_len(s))); }
+  // use this after collecting rule ids with parser.get_rule(const char*)
+  inline bool is(const Parser& p, rule_id rid) const;
 };
 
 struct Match
@@ -389,10 +391,15 @@ struct Parser
     constexpr bool owns_name() const
     { return type >= UNDECLARED_RULE; }
   };
+  struct Output
+  {
+    Own<Unit*> units;
+    uint32_t ucount;
+  };
   struct FileParse
   {
     Own<char*> parsed_code;
-    Own<_butch_utils::list<Unit>> units;
+    Own<Output> output;
   };
   struct RulePack
   { _butch_utils::View<char> class_name; Rule rule; };
@@ -446,19 +453,19 @@ struct Parser
 
   void debug(FILE* f);
   void debug_output(FILE* f, const _butch_utils::View<Unit> ls);
-  Own<_butch_utils::list<Unit>> parse(Ref<char*> s);
+  Own<Output> parse(Ref<char*> s);
   FileParse parse_file(Ref<const char*> filename)
   {
     char* code = _butch_read_file(filename);
     if (code == nullptr)
     {
-      _butch_utils::list<Unit> err;
-      err.init();
-      return {nullptr, err};
+      return {nullptr, {nullptr, 0}};
     }
     auto ret = parse(code);
     return {code, ret};
   }
+  rule_id get_rule(const char* s) const;
+
   Error::Type _make_rule(Rule& r, Ref<char*>& s);
   class_id _find_or_make_class(_butch_utils::View<char>);
   rule_id _find_rule(class_id);
@@ -531,5 +538,11 @@ inline _butch_utils::View<char> Match::s_view(const Parser& p)
   return _butch_utils::View<char>::range(p.parsed_code.start+s_start, s_len);
 }
 
+inline bool Unit::is(const Parser& p, rule_id rid) const
+{
+  return id == rid || p.rules[rid].out == p.rules[id].out;
+}
+
 #undef FLAG_T
 #endif
+

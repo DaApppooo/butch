@@ -21,7 +21,7 @@ Own<char*> _butch_read_file(Ref<const char*> filename)
   auto s = (char*)malloc(len+1);
   const size_t res = fread(s, 1, len, f);
   fclose(f);
-  assert(res == len);
+  assert(res == size_t(len));
   s[len] = 0;
   return s;
 }
@@ -39,7 +39,7 @@ View<char> Unit::str(const Parser& p)
   return View<char>::range(p.parsed_code.start+s_start, s_len);
 }
 
-bool Unit::is(const Parser& p, const View<const char> s)
+bool Unit::is(const Parser& p, const View<const char> s) const
 {
   const View<char> alt = { (char*)s.start, s.len };
   if (s.start == nullptr) return false;
@@ -56,6 +56,17 @@ bool Unit::is(const Parser& p, const View<const char> s)
     return _butch_alias_match(p, *r, *this);
   else
     return id == rid;
+}
+
+rule_id Parser::get_rule(const char* s) const
+{
+  const View<char> alt = { (char*)s, u32(str_len(s)) };
+  for (rule_id i = 0; i < rules.len(); i++)
+  {
+    if (classes[rules[i].out] == alt)
+      return i;
+  }
+  return Rule::UNKNOWN_RULE;
 }
 
 const char* Parser::_load_str(
