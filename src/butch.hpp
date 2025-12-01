@@ -114,6 +114,30 @@ struct Unit
   inline bool is(const Parser& p, rule_id rid) const;
 };
 
+struct UnitNodeWrapper
+{
+  using Self = UnitNodeWrapper;
+  Unit* current;
+  uint32_t len;
+
+  Self next_sib() const
+  { return { current + current->children_len + 1, len - 5 }; }
+  Self first_child() const
+  { return { current + 1 }; }
+
+  inline uint32_t child_count() const { return current->children_len; }
+  
+  inline bool is(const Parser& p, const _butch_utils::View<const char> s) const
+  { return current->is(p, s); }
+  bool is(const Parser& p, const char* s) const
+  { return current->is(p, s); }
+  // use this after collecting rule ids with parser.get_rule(const char*)
+  inline bool is(const Parser& p, rule_id rid) const
+  { return current->is(p, rid); }
+  template <class CustomView>
+  inline CustomView str(const Parser& p) const;
+};
+
 struct Match
 {
   uint32_t s_start;
@@ -542,6 +566,9 @@ inline bool Unit::is(const Parser& p, rule_id rid) const
 {
   return id == rid || p.rules[rid].out == p.rules[id].out;
 }
+template <class CustomView>
+inline CustomView UnitNodeWrapper::str(const Parser& p) const
+{ return { p.parsed_code.start + current->s_start, current->s_len }; }
 
 #undef FLAG_T
 #endif
