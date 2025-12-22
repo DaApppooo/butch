@@ -17,6 +17,7 @@ EXAMPLE = "examples/readparse.cpp"
 EXAMPLE_BIN = 'bin/' + fname(chext(EXAMPLE,'.out'))
 EXAMPLE_CMD = f"{EXAMPLE_BIN} {EXAMPLE_ARGS}"
 SRC_ARG = ' '.join(SRC)
+CFLAGS = "-std=c++23"
 cdb = [
   {
     'directory': path.abspath('src'),
@@ -45,18 +46,18 @@ argv.append('')
 if argv[1] == "pg":
   # to use with KCacheGrind
   run(f"""
-    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} {FLAGS} -g || exit 1
+    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} {FLAGS} {CFLAGS} -g || exit 1
     valgrind --tool=callgrind --callgrind-out-file=callgrind.output {EXAMPLE_CMD} || exit 1
   """)
 elif  argv[1] == "san":
   run(f"""
-    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} {FLAGS} -g --sanitize=address || exit 1
+    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} {FLAGS} {CFLAGS} -g --sanitize=address || exit 1
     {EXAMPLE_CMD}
   """)
 elif  argv[1] == "db":
   # simple gdb
   run(f"""
-    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} {FLAGS} -g || exit 1
+    g++ {EXAMPLE} {SRC_ARG} -o {EXAMPLE_BIN} {FLAGS} -g {CFLAGS} || exit 1
     gdb --args {EXAMPLE_CMD} || exit 1
   """)
 elif  argv[1] == "clean":
@@ -71,7 +72,7 @@ elif  argv[1] == "shared":
   """)
 elif argv[1] == "static":
   for src, obj in zip(SRC, OBJ):
-    run(f"g++ -c {src} -o {obj} -O3")
+    run(f"g++ -c {src} -o {obj} -O3 {CFLAGS}")
   run(f"ar rcs bin/libbutch.a {' '.join(OBJ)}")
   run(f"\\ls bin/libbutch.a", False)
 else:

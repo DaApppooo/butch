@@ -1,0 +1,3 @@
+[submodule "src/mystd"]
+	path = src/mystd
+	url = https://github.com/DaApppooo/mystd

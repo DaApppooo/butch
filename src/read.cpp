@@ -2,7 +2,6 @@
 #include "stuff.hpp"
 #include <cctype>
 #include <cstdio>
-using namespace _butch_utils;
 
 #define assume(X) do { assert(X); [[assume(X)]]; } while(false)
 
@@ -117,16 +116,16 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
 class_id Parser::_find_or_make_class(View<char> s)
 {
   const uint32_t l = classes.len();
-  if (s.len == 5 && memcmp(s.start, "Begin", 5) == 0)
+  if (s.len() == 5 && memcmp(s.begin(), "Begin", 5) == 0)
     return Rule::BEGIN;
-  if (s.len == 3 && memcmp(s.start, "End", 3) == 0)
+  if (s.len() == 3 && memcmp(s.begin(), "End", 3) == 0)
     return Rule::END;
   for (uint32_t i = 0; i < l; i++)
   {
-    View<char> v = classes.atp(i);
-    if (v.len != s.len)
+    View<char> v = classes[i];
+    if (v.len() != s.len())
       continue;
-    if (memcmp(v.start, s.start, v.len) == 0)
+    if (memcmp(v.begin(), s.begin(), v.len()) == 0)
       return i;
   }
   classes.push(s);
@@ -137,7 +136,7 @@ rule_id Parser::_find_rule(class_id class_name)
 {
   for (uint32_t i = 0; i < rules.len(); i++)
   {
-    if (rules.atp(i).out == class_name)
+    if (rules[i].out == class_name)
       return i;
   }
   return Rule::UNKNOWN_RULE;
@@ -147,7 +146,7 @@ ctx_id Parser::_find_ctx(class_id class_name)
 {
   for (uint32_t i = 0; i < ctxs.len(); i++)
   {
-    if (ctxs.atp(i).name == class_name)
+    if (ctxs[i].name == class_name)
       return i;
   }
   return GLOBAL_CONTEXT;
@@ -155,8 +154,8 @@ ctx_id Parser::_find_ctx(class_id class_name)
 
 #define ERROR_CN(ERR, CLASS_ID) \
           { start = ALLOCPY_CN(CLASS_ID); \
-          self.destroy(); \
-          return err<Parser>(Error{ \
+          self.drop(); \
+          return Err(Error{ \
             .type=ERR, \
             .name=start \
           }); }
@@ -173,7 +172,7 @@ Parser::Error::Type _butch_ctx_change(
   while (isalnum(*s)) s++;
   cctx = self.ctxs.len();
   self.ctxs.push(Context{});
-  Context& ctx = self.ctxs.atn(-1);
+  Context& ctx = self.ctxs[-1];
   ctx.rulesets_start = self.rulesets_rules.len();
   ctx.rules_start = self.rules.len();
   ctx.rule_count = 0;
@@ -336,7 +335,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     }
 
   if (s == nullptr)
-    return err<Parser>(Error{Error::CANT_OPEN_FILE, 0});
+    return Err(Error{Error::CANT_OPEN_FILE, 0});
   Parser self;
   self.butch_code = s;
   
@@ -359,7 +358,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     if (*s == '=')
     { // context change/decl
       if ((errc = _butch_ctx_change(self, s, start, cctx)) != Error::NONE)
-        ERROR_CN(errc, self.ctxs.atn(-1).name);
+        ERROR_CN(errc, self.ctxs[-1].name);
       continue;
     }
     else if (*s == '+')
@@ -398,8 +397,8 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       else
       {
         start = _butch_allocpy_view(class_name);
-        self.destroy();
-        return err<Parser>(Error{
+        self.drop();
+        return Err(Error{
           .type=Error::RULE_SYNTAX_ERROR,
           .name=start
         });
@@ -413,7 +412,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       Rule& r = self.rules[-1];
       r.ruleset_start = self.rulesets_rules.len();
       r.out = self._find_or_make_class(class_name);
-      if (*class_name.start == '?')
+      if (*class_name.begin() == '?')
       {
         if (rl_parse)
           ERROR_CN(Error::ALIAS_SYNTAX_ERROR, r.out);
@@ -476,7 +475,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
             {
               r = self.rules[j];
             } else {
-              self.rules.insert(self.rules[j], i+j);
+              self.rules.insert(i+j, self.rules[j]);
               ctx_rulestart_offset++;
               if (cctx_p)
                 cctx_p->rule_count++;
@@ -579,9 +578,11 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     }
   }
   
-  return ok<Error>(self);
+  return Ok(self);
 }
 
+char fix(View<char> v) { char c = v.last(); v.last() = '\0'; return c; }
+void mov(View<char> v, char c) { v.last() = c; }
 
 void Parser::debug(FILE* f)
 {
@@ -592,11 +593,11 @@ void Parser::debug(FILE* f)
   fprintf(f, "=== Classes (4 columns) ===\n");
   for (View<char>& t : classes)
   {
-    if (*t.start != '\'')
+    if (*t.begin() != '\'')
     {
-      c = t.fix();
-      fprintf(f, "  %s", t.start);
-      t.mov(c);
+      c = fix(t);
+      fprintf(f, "  %s", t.begin());
+      mov(t, c);
     }
     else
       fprintf(f, "  <compiled regex>");
@@ -623,9 +624,9 @@ void Parser::debug(FILE* f)
     else
     {
       const Context& ctx = ctxs[ctid];
-      c = classes[ctx.name].fix();
-      fprintf(f, "= %s", classes[ctx.name].start);
-      classes[ctx.name].mov(c);
+      c = fix(classes[ctx.name]);
+      fprintf(f, "= %s", classes[ctx.name].begin());
+      mov(classes[ctx.name], c);
       k_end = k + ctx.rule_count;
       for (u8 i = 0; i < ctx.be_count; i++)
         fprintf(f, " (%04i, %04i)", ctx.begin[i], ctx.end[i]);
@@ -640,9 +641,9 @@ void Parser::debug(FILE* f)
       fprintf(f, "  %04i ", k);
       if (r.is_context())
       {
-        c = classes[r.out].fix();
-        fprintf(f, "! %s\n", classes[r.out].start);
-        classes[r.out].mov(c);
+        c = fix(classes[r.out]);
+        fprintf(f, "! %s\n", classes[r.out].begin());
+        mov(classes[r.out], c);
         continue;
       }
       if (r.out == Rule::BEGIN)
@@ -651,9 +652,9 @@ void Parser::debug(FILE* f)
         fprintf(f, "End =");
       else
       {
-        c = classes[r.out].fix();
-        fprintf(f, "%s =", classes[r.out].start);
-        classes[r.out].mov(c);
+        c = fix(classes[r.out]);
+        fprintf(f, "%s =", classes[r.out].begin());
+        mov(classes[r.out], c);
       }
       for (i = 0; i < i32(r.input_len); i++)
       {
@@ -680,13 +681,13 @@ void Parser::debug(FILE* f)
           fprintf(f, " <compiled regex>"); 
         } else if (in_rule(r, i) == Rule::REPARSE) {
           const View<char>& v = classes[ctxs[in_class(r, i)].name];
-          c = v.fix();
-          fprintf(f, " {%s}", v.start); 
-          v.mov(c);
+          c = fix(v);
+          fprintf(f, " {%s}", v.begin()); 
+          mov(v, c);
         } else {
-          c = classes[in_class(r, i)].fix();
-          fprintf(f, " %s", classes[in_class(r, i)].start);
-          classes[in_class(r, i)].mov(c);
+          c = fix(classes[in_class(r, i)]);
+          fprintf(f, " %s", classes[in_class(r, i)].begin());
+          mov(classes[in_class(r, i)], c);
         }
         if (in_rule(r, i) >= 0)
           fprintf(f, " [%i]", in_rule(r, i));

@@ -5,69 +5,53 @@
 #include <cstdlib>
 #include <initializer_list>
 #include <regex>
-#include <type_traits>
-#include "list.hpp"
+#include "mystd/wrapper.hpp"
+#include "mystd/list.hpp"
+#include "mystd/string.hpp"
+#include "mystd/result.hpp"
 
-enum ResultType { OK, ERR };
-template <class Ok = int, class Err = int>
-struct Result
+template <class T>
+struct Pack
 {
-  ResultType type;
-  union { Ok ok; Err err; };
-  Result() {}
-  template <class T>
-  Result(ResultType r, const T& t)
+  struct State { u32 a,b; };
+  List<T> _ls;
+  u32 a, b;
+  macro void init()
   {
-    static_assert(std::is_same_v<T, Ok> || std::is_same_v<T, Err>, "Diff types ???");
-    switch (r)
-    { case OK: memcpy(&ok, &t, sizeof(Ok)); break;
-      case ERR: memcpy(&err, &t, sizeof(Err)); break; }
-    type = r;
+    _ls = List<T>::init();
+    a = b = 0;
   }
-  Result(const Result<Ok, Err>& r)
+  macro T* data() { return _ls.data(); }
+  macro View<T> to_view() { return View<T>::range(_ls.begin()+a, b-a); }
+  macro View<const T> to_view() const
+  { return View<const T>::range(_ls.begin()+a, b-a); }
+  macro void push(Own<T> elem)
+  { _ls.push(elem); }
+  macro List<T>& ls() { return _ls; }
+  macro void insert(u32 index, T t)
+  { _ls.insert(index+a, t); }
+  macro void rmv(u32 index)
+  { _ls.rm(a+index); }
+  macro void rmv(u32 from_, u32 to_)
+  { _ls.rm(a+from_, a+to_); }
+  macro u32 len() const { return b-a; }
+  macro T& operator [] (u32 i) { return _ls[a+i]; }
+  macro const T& operator [] (u32 i) const { return _ls[a+i]; }
+  macro void eat() { a++; }
+  macro void burp() { a--; }
+  macro State set(u32 c, u32 len)
   {
-    switch (r.type)
-    { case OK: memcpy(&ok, &r.ok , sizeof(Ok)); break;
-      case ERR: memcpy(&err, &r.err , sizeof(Err)); break; }
+    State ret = { a, b };
+    a += c;
+    b = a+len;
+    return ret;
   }
-  Result(const Result<Ok, Err>&& r)
+  macro void reset(State state)
   {
-    switch (r.type)
-    { case OK: memcpy(&ok, &r.ok , sizeof(Ok)); break;
-      case ERR: memcpy(&err, &r.err , sizeof(Err)); break; }
-  }
-  template <class T>
-  Result(const Result<Ok, T>& r)
-  {
-    assert(r.type == OK);
-    type = r.type;
-    memcpy(&ok, &r.ok, sizeof(Ok));
-  }
-  template <class T>
-  Result(const Result<T, Err>& r)
-  {
-    assert(r.type == ERR);
-    type = r.type;
-    memcpy(&err, &r.err, sizeof(Err));
-  }
-  ~Result()
-  {
-    switch (type)
-    { case OK: ok.~Ok();
-      case ERR: err.~Err(); }
+    a = state.a;
+    b = state.b;
   }
 };
-template <class Err, class Ok>
-Result<Ok,Err> ok(Ok& ok_) { return Result<Ok, Err>(OK, ok_); }
-template <class Ok, class Err>
-Result<Ok,Err> err(Err& err_) { return Result<Ok, Err>(ERR, err_); }
-template <class Err, class Ok>
-Result<Ok,Err> ok(Ok&& ok_) { return Result<Ok, Err>(OK, ok_); }
-template <class Ok, class Err>
-Result<Ok,Err> err(Err&& err_) { return Result<Ok, Err>(ERR, err_); }
-
-template <class T> using Own = T;
-template <class T> using Ref = T;
 
 using rule_id = int32_t;
 using class_id = int32_t;
@@ -106,10 +90,10 @@ struct Unit
   }
 
   constexpr uint32_t s_end() const { return s_start + s_len; }
-  _butch_utils::View<char> str(const Parser&);
-  bool is(const Parser&, const _butch_utils::View<const char> s) const;
+  View<const char> str(const Parser&) const;
+  bool is(const Parser&, const View<const char> s) const;
   bool is(const Parser& p, const char* s) const
-  { return is(p, _butch_utils::View<const char>::range(s, _butch_utils::str_len(s))); }
+  { return is(p, View<const char>::range(s, str_len_s(s))); }
   // use this after collecting rule ids with parser.get_rule(const char*)
   inline bool is(const Parser& p, rule_id rid) const;
 };
@@ -127,7 +111,7 @@ struct UnitNodeWrapper
 
   inline uint32_t child_count() const { return current->children_len; }
   
-  inline bool is(const Parser& p, const _butch_utils::View<const char> s) const
+  inline bool is(const Parser& p, const View<const char> s) const
   { return current->is(p, s); }
   bool is(const Parser& p, const char* s) const
   { return current->is(p, s); }
@@ -147,7 +131,7 @@ struct Match
   uint16_t u_start; // unit view begin (included)
   uint16_t u_end; // unit view end (excluded)
   constexpr uint32_t s_end() { return s_start+s_len; }
-  _butch_utils::View<char> s_view(const Parser&);
+  View<const char> s_view(const Parser&);
   bool include(Match m)
   {
     if (!m.matched)
@@ -298,32 +282,32 @@ struct Rule
   { assert(is_context() && input_len == 0); return ruleset_start; }
   void _apply_context(
     Parser&,
-    _butch_utils::Pack<Unit>&,
-    _butch_utils::list<Rule::Pt>&,
+    Pack<Unit>&,
+    List<Rule::Pt>&,
     Match m
   );
 
   Match _sequence_match(
     Parser&,
-    _butch_utils::Pack<Unit>&,
-    _butch_utils::list<Pt>&
+    Pack<Unit>&,
+    List<Pt>&
   );
   Match _match_str(
     const Parser&,
-    _butch_utils::View<Unit>,
-    _butch_utils::list<Pt>&,
+    View<Unit>,
+    List<Pt>&,
     const class_id
   );
   Match _match_rgx(
     Parser&,
-    _butch_utils::View<Unit>,
-    _butch_utils::list<Pt>&,
+    View<Unit>,
+    List<Pt>&,
     const class_id
   );
   Match _match_context(
     Parser& p,
-    _butch_utils::Pack<Unit>& units,
-    _butch_utils::list<Rule::Pt>& u
+    Pack<Unit>& units,
+    List<Rule::Pt>& u
   );
 };
 
@@ -346,7 +330,7 @@ struct Context
 };
 
 Own<char*> _butch_read_file(Ref<const char*> filename);
-Own<char*> _butch_allocpy_view(const _butch_utils::View<char> v);
+Own<char*> _butch_allocpy_view(const View<char> v);
 bool _butch_alias_match(
   const Parser& p,
   const Rule& alias,
@@ -361,17 +345,17 @@ Create with (both return a valid Parser structure):
     : open, read and calls Parser::read.
 Use the parser to parse your custom language with:
   Parser.parse(Ref<char*> code)
-    : Returns a tree with a linear layout in memoy in a _butch_utils::list (eqv.
+    : Returns a tree with a linear layout in memoy in a list (eqv.
       std::vector). Each node is a 'Unit', and has Unit.child_count elements.
   Parser.parse_file(Ref<const char*> filename)
     : Returns a Parser::FileParse containing a string with the content of the
       opened file (can be used to retrieve the content of tokens for example),
-      and the _butch_utils::list tree as explained with Parser.parse
+      and the list tree as explained with Parser.parse
 */
 struct Parser
 {
-  using RegexMatch = std::match_results<char*, std::string::allocator_type>;
-  using RegexPatt = std::basic_regex<char>;
+  using RegexMatch = std::match_results<char*>;
+  using RegexPatt = FromStdCPPWrapper<std::basic_regex<char>>;
   FLAG_T FLAG_TRIM_SPACE_LITERALS     = 0b0001U;
   // Equivalent to surrounding the string with regex's \b
   // (you can't do that in butch)
@@ -426,25 +410,25 @@ struct Parser
     Own<Output> output;
   };
   struct RulePack
-  { _butch_utils::View<char> class_name; Rule rule; };
+  { View<char> class_name; Rule rule; };
   Own<char*> butch_code;
-  _butch_utils::list<Context> ctxs;
-  _butch_utils::list<Rule> rules;
-  _butch_utils::list<_butch_utils::View<char>> classes;
+  List<Context> ctxs;
+  List<Rule> rules;
+  List<View<char>> classes;
   // these two are read linearly when testing every rule, so it's faster
   // to sequence then in memory
-  _butch_utils::list<rule_id> rulesets_rules; // TODO: use same cap and length data for both
-  _butch_utils::list<class_id> rulesets_classes;
-  _butch_utils::list<RegexPatt> regex_patterns;
-  _butch_utils::string buff;
-  _butch_utils::View<char> parsed_code;
+  List<rule_id> rulesets_rules; // TODO: use same cap and length data for both
+  List<class_id> rulesets_classes;
+  List<RegexPatt> regex_patterns;
+  CString<> buff;
+  View<char> parsed_code;
   uint32_t flags;
   int flags_data;
 
   Parser()
   {
     butch_code = nullptr;
-    parsed_code = _butch_utils::View<char>::empty();
+    parsed_code = View<char>::empty();
     flags = FLAG_TRIM_SPACE_LITERALS;
     flags_data = 0;
     rules.init(); classes.init();
@@ -476,7 +460,7 @@ struct Parser
   );
 
   void debug(FILE* f);
-  void debug_output(FILE* f, const _butch_utils::View<Unit> ls);
+  void debug_output(FILE* f, const View<Unit> ls);
   Own<Output> parse(Ref<char*> s);
   FileParse parse_file(Ref<const char*> filename)
   {
@@ -491,35 +475,35 @@ struct Parser
   rule_id get_rule(const char* s) const;
 
   Error::Type _make_rule(Rule& r, Ref<char*>& s);
-  class_id _find_or_make_class(_butch_utils::View<char>);
+  class_id _find_or_make_class(View<char>);
   rule_id _find_rule(class_id);
   ctx_id _find_ctx(class_id);
   bool _check_and_do_rule(
     Rule& r,
-    _butch_utils::Pack<Unit>& out,
-    _butch_utils::list<Rule::Pt>& pt_buffer
+    Pack<Unit>& out,
+    List<Rule::Pt>& pt_buffer
   );
   // just loads [s.start, s.start+s.len[ U {0} into buff
   //   surround is used to add "\\b" around a regex string 
   const char* _load_str(
-    _butch_utils::View<char> s,
-    _butch_utils::View<char> surround = _butch_utils::View<char>::empty(),
-    _butch_utils::View<char> start = _butch_utils::View<char>::empty()
+    View<const char> s,
+    View<char> surround = View<char>::empty(),
+    View<char> start = View<char>::empty()
   );
   // same as _load but transforms "\\n" into "\n"
-  const char* _comp_str(_butch_utils::View<char> s);
+  const char* _comp_str(View<const char> s);
   /*
     On sucess:
       returns x >= 0, x is the index in .regex_patterns of the compiled regex
     On failure:
       return -1 and push in the classes a special view such that:
-        it's a _butch_utils::View<Own<char>> (you need to free the pointer in it)
+        it's a View<Own<char>> (you need to free the pointer in it)
         its length is 0 (you can retrieve the acutal length via the cstr way)
     The 'rule_output' parameter is used to distinguish Begin/End from other
     rules.
   */
-  int32_t _comp_rgx(const _butch_utils::View<char> patt, rule_id rule_output);
-  _butch_utils::View<char> _rgx_match(_butch_utils::View<char> big, const RegexPatt& pattern);
+  int32_t _comp_rgx(const View<char> patt, rule_id rule_output);
+  View<char> _rgx_match(View<char> big, RegexPatt& pattern);
   bool _should_be_trimmed(uint32_t begin, uint32_t len);
   RulePack operator [] (int index)
   { return {classes[index], rules[index]}; }
@@ -535,31 +519,31 @@ struct Parser
   }
   inline void _push_rc(rule_id rid, class_id cid)
   { rulesets_rules.push(rid); rulesets_classes.push(cid); }
-  inline rule_id& in_rule(const Rule& r, int index) const
+  inline const rule_id& in_rule(const Rule& r, int index) const
   { return rulesets_rules[r.ruleset_start + index]; }
-  inline class_id& in_class(const Rule& r, int index) const
+  inline const class_id& in_class(const Rule& r, int index) const
   { return rulesets_classes[r.ruleset_start + index]; }
-  void destroy()
+  inline rule_id& in_rule(const Rule& r, int index)
+  { return rulesets_rules[r.ruleset_start + index]; }
+  inline class_id& in_class(const Rule& r, int index)
+  { return rulesets_classes[r.ruleset_start + index]; }
+  void drop()
   {
     free(butch_code);
     butch_code = nullptr;
-    classes.destroy();
-    rules.destroy();
-    rulesets_classes.destroy();
-    rulesets_rules.destroy();
-    buff.destroy();
-    ctxs.destroy();
-    for (uint32_t i = 0; i < regex_patterns.len(); i++)
-    {
-      regex_patterns[i].~basic_regex();
-    }
-    regex_patterns.destroy();
+    ::drop(
+      classes, rules,
+      rulesets_classes,
+      rulesets_rules,
+      buff, ctxs,
+      regex_patterns
+    );
   }
 };
 
-inline _butch_utils::View<char> Match::s_view(const Parser& p)
+inline View<const char> Match::s_view(const Parser& p)
 {
-  return _butch_utils::View<char>::range(p.parsed_code.start+s_start, s_len);
+  return View<const char>::range(p.parsed_code.begin()+s_start, s_len);
 }
 
 inline bool Unit::is(const Parser& p, rule_id rid) const
@@ -568,7 +552,7 @@ inline bool Unit::is(const Parser& p, rule_id rid) const
 }
 template <class CustomView>
 inline CustomView UnitNodeWrapper::str(const Parser& p) const
-{ return { p.parsed_code.start + current->s_start, current->s_len }; }
+{ return { p.parsed_code.begin() + current->s_start, current->s_len }; }
 
 #undef FLAG_T
 #endif
