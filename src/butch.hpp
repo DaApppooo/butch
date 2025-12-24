@@ -105,7 +105,10 @@ struct UnitNodeWrapper
   uint32_t len;
 
   Self next_sib() const
-  { return { current + current->children_len + 1, len - 5 }; }
+  { return {
+    current + current->children_len + 1,
+    len - current->children_len - 1
+  }; }
   Self first_child() const
   { return { current + 1 }; }
 
@@ -118,8 +121,7 @@ struct UnitNodeWrapper
   // use this after collecting rule ids with parser.get_rule(const char*)
   inline bool is(const Parser& p, rule_id rid) const
   { return current->is(p, rid); }
-  template <class CustomView>
-  inline CustomView str(const Parser& p) const;
+  inline View<const char> str(const Parser& p) const;
 };
 
 struct Match
@@ -330,7 +332,7 @@ struct Context
 };
 
 Own<char*> _butch_read_file(Ref<const char*> filename);
-Own<char*> _butch_allocpy_view(const View<char> v);
+Own<char*> _butch_allocpy_view(const View<const char> v);
 bool _butch_alias_match(
   const Parser& p,
   const Rule& alias,
@@ -550,8 +552,7 @@ inline bool Unit::is(const Parser& p, rule_id rid) const
 {
   return id == rid || p.rules[rid].out == p.rules[id].out;
 }
-template <class CustomView>
-inline CustomView UnitNodeWrapper::str(const Parser& p) const
+inline View<const char> UnitNodeWrapper::str(const Parser& p) const
 { return { p.parsed_code.begin() + current->s_start, current->s_len }; }
 
 #undef FLAG_T
