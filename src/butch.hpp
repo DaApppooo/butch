@@ -200,7 +200,6 @@ struct Rule
   static constexpr class_id ALIAS = -2;
   static constexpr class_id BEGIN = -3;
   static constexpr class_id END = -4;
-  
 
   static constexpr Match PARTIAL_FAILURE = {0, 0, true, 0, 0};
   static constexpr Match TOTAL_FAILURE = {0, 0, false, 0, 0};
@@ -433,11 +432,6 @@ struct Parser
     parsed_code = View<char>::empty();
     flags = FLAG_TRIM_SPACE_LITERALS;
     flags_data = 0;
-    rules.init(); classes.init();
-    rulesets_rules.init(); rulesets_classes.init();
-    regex_patterns.init();
-    ctxs.init();
-    buff.init();
   }
   Parser(const Parser&) = default;
   Parser(Parser&&) = default;

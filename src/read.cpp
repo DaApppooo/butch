@@ -95,6 +95,8 @@ Parser::Error::Type Parser::_make_rule(Rule& r, char*& s)
         default:
         {
           start = s;
+          if (!isalnum(*s))
+          { return Error::RULE_SYNTAX_ERROR; }
           while (isalnum(*s) || *s == '?')
             s++;
           const class_id cid =
@@ -136,7 +138,7 @@ rule_id Parser::_find_rule(class_id class_name)
 {
   for (uint32_t i = 0; i < rules.len(); i++)
   {
-    if (rules[i].out == class_name)
+    if (rules[i].out == class_name && !rules[i].is_unknown_copy())
       return i;
   }
   return Rule::UNKNOWN_RULE;
@@ -249,6 +251,7 @@ class_id _butch_copy_object(
       if (cctx >= 0)
         self.ctxs[cctx].rule_count++;
     }
+    return -1;
   }
   do
   {
@@ -323,9 +326,36 @@ void _butch_ctx_rule(
   } while (*s != '\n');
 }
 
+Context* update_context_ptr(
+  Parser& p,
+  Context* c,
+  u32 rule_index,
+  u32 ctx_rulestart_offset
+) {
+  if (c == nullptr)
+  {
+    if (p.ctxs.len() > 0
+        && c == nullptr
+        && rule_index >= p.ctxs[0].rules_start+ctx_rulestart_offset)
+    {
+      c = &p.ctxs[0];
+      c->rules_start += ctx_rulestart_offset;
+    }
+  }
+  else if (
+     c+1 < p.ctxs.end()
+  && rule_index >= c[1].rules_start+ctx_rulestart_offset
+  ) {
+    c++;
+    c->rules_start += ctx_rulestart_offset;
+  }
+  return c;
+}
+
 Result<Parser, Parser::Error> Parser::read(Own<char*> s)
 {
-#define ALLOCPY_CN(CLASS_ID) _butch_allocpy_view(self.classes[CLASS_ID])
+#define ALLOCPY_CN(CLASS_ID) \
+  _butch_allocpy_view(self.classes[CLASS_ID].to_const())
 #define CHECK_COMMENTS \
     if (*s == '#') \
     { \
@@ -338,6 +368,15 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     return Err(Error{Error::CANT_OPEN_FILE, 0});
   Parser self;
   self.butch_code = s;
+  self.parsed_code = View<char>::empty();
+  self.flags = FLAG_TRIM_SPACE_LITERALS;
+  self.flags_data = 0;
+  self.ctxs = List<Context>::init();
+  self.rules = List<Rule>::init();
+  self.classes = List<View<char>>::init();
+  self.rulesets_rules = self.rulesets_classes = List<i32>::init();
+  self.regex_patterns = List<RegexPatt>::init();
+  self.buff = CString<>::init();
   
   View<char> class_name;
   Error::Type errc;
@@ -396,7 +435,7 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       }
       else
       {
-        start = _butch_allocpy_view(class_name);
+        start = _butch_allocpy_view(class_name.to_const());
         self.drop();
         return Err(Error{
           .type=Error::RULE_SYNTAX_ERROR,
@@ -438,63 +477,17 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
 
   // resolve rules with Rule.in_rule(x) == UNKNOWN_RULE
   bool is_token;
-  Context* cctx_p = nullptr;
-  u32 ctx_rulestart_offset = 0;
+  bool has_unknown_copies = false;
   for (uint32_t i = 0; i < self.rules.len(); i++)
   {
     Rule& r = self.rules[i];
-    if (cctx_p == nullptr)
-    {
-      if (self.ctxs.len() > 0
-          && cctx_p == nullptr
-          && i >= self.ctxs[0].rules_start+ctx_rulestart_offset)
-      {
-        cctx_p = &self.ctxs[0];
-        cctx_p->rules_start += ctx_rulestart_offset;
-      }
-    }
-    else if (
-       cctx_p+1 < self.ctxs.end()
-    && i >= cctx_p[1].rules_start+ctx_rulestart_offset
-    ) {
-      cctx_p++;
-      cctx_p->rules_start += ctx_rulestart_offset;
-    }
     if (r.is_unknown_copy())
     {
-      const ctx_id ctid = self._find_ctx(r.out);
-      if (ctid != GLOBAL_CONTEXT)
-      {
-        const Context& ctx = self.ctxs[ctid];
-        const u32 ie = ctx.rules_start+ctx.rule_count;
-        for (u32 j = ctx.rules_start; j < ie; j++)
-        {
-          if (self.rules[j].out > 0 && !self.rules[j].is_alias())
-          {
-            if (r.is_unknown_copy())
-            {
-              r = self.rules[j];
-            } else {
-              self.rules.insert(i+j, self.rules[j]);
-              ctx_rulestart_offset++;
-              if (cctx_p)
-                cctx_p->rule_count++;
-            }
-          }
-        }
-      }
-      else
-      {
-        const rule_id rid = self._find_rule(r.out);
-        if (rid == Rule::UNKNOWN_RULE)
-          ERROR_CN(Error::UNDECLARED_RULE, r.out);
-        r = self.rules[rid];
-      }
+      has_unknown_copies = true;
+      continue; // specific passes for this
     }
     if (r.input_len == 0)
       continue;
-    if (self.in_rule(r, 0) == Rule::PLUS)
-      ERROR_CN(Error::MISPLACED_PLUS, r.out);
     if (r.is_context())
     {
       if (r.is_unknown_context())
@@ -509,6 +502,8 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     is_token = !(r.is_alias() || r.is_context() || r.has_rl_parse());
     rule_id* rids = self.rulesets_rules.data()+r.ruleset_start;
     rule_id* cids = self.rulesets_classes.data()+r.ruleset_start;
+    if (*rids == Rule::PLUS)
+      ERROR_CN(Error::MISPLACED_PLUS, r.out);
     for (u32 j = 0; j < r.input_len; j++)
     {
       if (
@@ -544,6 +539,57 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     }
     r.is_token(is_token);
   }
+
+  Context* cctx_p;
+  u32 ctx_rulestart_offset;
+  while (has_unknown_copies)
+  {
+    ctx_rulestart_offset = 0;
+    has_unknown_copies = false;
+    cctx_p = nullptr;
+    for (uint32_t i = 0; i < self.rules.len(); i++)
+    {
+      Rule& r = self.rules[i];
+      cctx_p = update_context_ptr(self, cctx_p, i, ctx_rulestart_offset);
+      if (!r.is_unknown_copy())
+        continue;
+      has_unknown_copies = true;
+      const rule_id rid = self._find_rule(r.out);
+      if (rid == Rule::UNKNOWN_RULE)
+      {
+        const ctx_id ctid = self._find_ctx(r.out);
+        if (ctid == GLOBAL_CONTEXT)
+          ERROR_CN(Error::UNDECLARED_CONTEXT, r.out);
+        const Context& ctx = self.ctxs[ctid];
+        const u32 ie = ctx.rules_start+ctx.rule_count;
+        for (u32 j = ctx.rules_start; j < ie; j++)
+        {
+          if (self.rules[j].out > 0 && !self.rules[j].is_alias())
+          {
+            if (r.is_unknown_copy())
+            {
+              r = self.rules[j];
+              assert(!r.is_unknown_copy());
+            } else {
+              println("{}", i+j);
+              self.rules.insert(i+j, self.rules[j]);
+              ctx_rulestart_offset++;
+              if (cctx_p)
+                cctx_p->rule_count++;
+            }
+          }
+        }
+      }
+      else
+      {
+        if (rid == Rule::UNKNOWN_RULE)
+          ERROR_CN(Error::UNDECLARED_RULE, r.out);
+        r = self.rules[rid];
+        assert(!r.is_unknown_copy());
+      }
+    }
+  }
+  
 
   // Resolve contexts
   for (u32 i = 0; i < self.ctxs.len(); i++)

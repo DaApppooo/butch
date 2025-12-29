@@ -72,7 +72,7 @@ elif  argv[1] == "shared":
   """)
 elif argv[1] == "static":
   for src, obj in zip(SRC, OBJ):
-    run(f"g++ -c {src} -o {obj} -O3 {CFLAGS}")
+    run(f"g++ -c {src} -o {obj} -g {CFLAGS}")
   run(f"ar rcs bin/libbutch.a {' '.join(OBJ)}")
   run(f"\\ls bin/libbutch.a", False)
 else:
