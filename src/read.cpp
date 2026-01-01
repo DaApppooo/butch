@@ -1,5 +1,6 @@
 #include "butch.hpp"
 #include "stuff.hpp"
+#include "mystd/algo.hpp"
 #include <cctype>
 #include <cstdio>
 
@@ -125,11 +126,10 @@ class_id Parser::_find_or_make_class(View<char> s)
   for (uint32_t i = 0; i < l; i++)
   {
     View<char> v = classes[i];
-    if (v.len() != s.len())
-      continue;
-    if (memcmp(v.begin(), s.begin(), v.len()) == 0)
+    if (v == s)
       return i;
   }
+  println("Pushed class: '{}'", _load_str(s.to_const()));
   classes.push(s);
   return classes.len()-1;
 }
@@ -262,9 +262,15 @@ class_id _butch_copy_object(
       s++;
     class_name = View<char>::from(start).to(s);
     const class_id cid = self._find_or_make_class(class_name);
-    const ctx_id ctid = self._find_ctx(cid);
-    if (ctid != GLOBAL_CONTEXT)
+    const rule_id rid = self._find_rule(cid);
+    if (rid == Rule::UNKNOWN_RULE)
     {
+      const ctx_id ctid = self._find_ctx(cid);
+      if (ctid == GLOBAL_CONTEXT)
+      {
+        self.rules.push(Rule::init_unknown_copy(cid));
+        return -1;
+      }
       const Context& ctx = self.ctxs[ctid];
       const u32 ie = ctx.rules_start+ctx.rule_count;
       for (u32 i = ctx.rules_start; i < ie; i++)
@@ -279,12 +285,6 @@ class_id _butch_copy_object(
     }
     else
     {
-      const rule_id rid = self._find_rule(cid);
-      if (rid == Rule::UNKNOWN_RULE)
-      {
-        self.rules.push(Rule::init_unknown_copy(cid));
-        return -1;
-      }
       if (!self.rules[rid].is_alias())
       {
         const Rule r = self.rules[rid];
@@ -326,31 +326,31 @@ void _butch_ctx_rule(
   } while (*s != '\n');
 }
 
-Context* update_context_ptr(
+ctx_id _butch_update_ctx_idx(
   Parser& p,
-  Context* c,
-  u32 rule_index,
-  u32 ctx_rulestart_offset
+  ctx_id c,
+  u32 rule_index
 ) {
-  if (c == nullptr)
+  if (c == -1)
   {
-    if (p.ctxs.len() > 0
-        && c == nullptr
-        && rule_index >= p.ctxs[0].rules_start+ctx_rulestart_offset)
-    {
-      c = &p.ctxs[0];
-      c->rules_start += ctx_rulestart_offset;
-    }
+    if (p.ctxs.len() > 0 && rule_index >= p.ctxs[0].rules_start)
+      c++;
   }
-  else if (
-     c+1 < p.ctxs.end()
-  && rule_index >= c[1].rules_start+ctx_rulestart_offset
-  ) {
+  else if (c+1 < p.ctxs.len() && rule_index >= p.ctxs[c+1].rules_start)
     c++;
-    c->rules_start += ctx_rulestart_offset;
-  }
   return c;
 }
+
+void _butch_offset_ctxs(Parser& self, ctx_id ctx, i32 off)
+{
+  if (ctx == GLOBAL_CONTEXT)
+    // .to_view() to avoid additional code instantiation
+    map(self.ctxs.to_view(), [off](Context& c){ c.rules_start+=off; });
+  else
+    map(self.ctxs[ctx, self.ctxs.len()],
+        [off](Context& c){ c.rules_start+=off; });
+}
+
 
 Result<Parser, Parser::Error> Parser::read(Own<char*> s)
 {
@@ -475,6 +475,8 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       s++;
   }
 
+  self.debug(stdout);
+
   // resolve rules with Rule.in_rule(x) == UNKNOWN_RULE
   bool is_token;
   bool has_unknown_copies = false;
@@ -540,17 +542,15 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
     r.is_token(is_token);
   }
 
-  Context* cctx_p;
-  u32 ctx_rulestart_offset;
+  // Resolve copies
   while (has_unknown_copies)
   {
-    ctx_rulestart_offset = 0;
+    ctx_id ctx_idx = -1;
     has_unknown_copies = false;
-    cctx_p = nullptr;
     for (uint32_t i = 0; i < self.rules.len(); i++)
     {
       Rule& r = self.rules[i];
-      cctx_p = update_context_ptr(self, cctx_p, i, ctx_rulestart_offset);
+      ctx_idx = _butch_update_ctx_idx(self, ctx_idx, i);
       if (!r.is_unknown_copy())
         continue;
       has_unknown_copies = true;
@@ -561,23 +561,34 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
         if (ctid == GLOBAL_CONTEXT)
           ERROR_CN(Error::UNDECLARED_CONTEXT, r.out);
         const Context& ctx = self.ctxs[ctid];
-        const u32 ie = ctx.rules_start+ctx.rule_count;
-        for (u32 j = ctx.rules_start; j < ie; j++)
+        if (ctx.rule_count == 0) [[unlikely]]
         {
-          if (self.rules[j].out > 0 && !self.rules[j].is_alias())
+          _butch_offset_ctxs(self, ctx_idx, -1);
+          self.rules.rm(i);
+          i--;
+        }
+        else
+        {
+          const u32 ie = ctx.rules_start+ctx.rule_count;
+          u32 k = 1;
+          for (u32 j = ctx.rules_start; j < ie; j++)
           {
-            if (r.is_unknown_copy())
+            if (self.rules[j].out > 0 && !self.rules[j].is_alias())
             {
-              r = self.rules[j];
-              assert(!r.is_unknown_copy());
-            } else {
-              println("{}", i+j);
-              self.rules.insert(i+j, self.rules[j]);
-              ctx_rulestart_offset++;
-              if (cctx_p)
-                cctx_p->rule_count++;
+              if (r.is_unknown_copy())
+              {
+                r = self.rules[j];
+                assert(!r.is_unknown_copy());
+              } else {
+                println("{} <- {}", i+k, j+k-1);
+                self.rules.insert(i+k, self.rules[j+k-1]);
+                k++;
+              }
             }
           }
+          _butch_offset_ctxs(self, ctx_idx, k-1);
+          i += ctx.rule_count;
+          self.debug(stdout);
         }
       }
       else
@@ -605,10 +616,6 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
       const Context& src = self.ctxs[ctid];
       const rule_id brid = src.begin[0];
       const rule_id erid = src.end[0];
-      // if (brid == Rule::UNKNOWN_RULE)
-      //   ERROR_CN(Error::CONTEXT_MISSING_BEGIN, src.name);
-      // if (erid == Rule::UNKNOWN_RULE)
-      //   ERROR_CN(Error::CONTEXT_MISSING_END, src.name);
       self.ctxs[i].begin[j] = brid;
       self.ctxs[i].end[j] = erid;
     }
@@ -627,8 +634,8 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
   return Ok(self);
 }
 
-char fix(View<char> v) { char c = v.last(); v.last() = '\0'; return c; }
-void mov(View<char> v, char c) { v.last() = c; }
+char fix(View<char> v) { char c = *v.end(); *v.end() = '\0'; return c; }
+void mov(View<char> v, char c) { *v.end() = c; }
 
 void Parser::debug(FILE* f)
 {
@@ -689,6 +696,20 @@ void Parser::debug(FILE* f)
       {
         c = fix(classes[r.out]);
         fprintf(f, "! %s\n", classes[r.out].begin());
+        mov(classes[r.out], c);
+        continue;
+      }
+      else if (r.is_unknown_copy())
+      {
+        c = fix(classes[r.out]);
+        fprintf(f, "?+ %s\n", classes[r.out].begin());
+        mov(classes[r.out], c);
+        continue;
+      }
+      else if (r.is_unknown_context())
+      {
+        c = fix(classes[r.out]);
+        fprintf(f, "?! %s\n", classes[r.out].begin());
         mov(classes[r.out], c);
         continue;
       }
