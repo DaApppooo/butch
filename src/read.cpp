@@ -580,7 +580,6 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
                 r = self.rules[j];
                 assert(!r.is_unknown_copy());
               } else {
-                println("{} <- {}", i+k, j+k-1);
                 self.rules.insert(i+k, self.rules[j+k-1]);
                 k++;
               }
@@ -588,7 +587,6 @@ Result<Parser, Parser::Error> Parser::read(Own<char*> s)
           }
           _butch_offset_ctxs(self, ctx_idx, k-1);
           i += ctx.rule_count;
-          self.debug(stdout);
         }
       }
       else

@@ -26,14 +26,14 @@ struct Pack
   macro View<const T> to_view() const
   { return View<const T>::range(_ls.begin()+a, b-a); }
   macro void push(Own<T> elem)
-  { _ls.push(elem); }
+  { _ls.push(elem); b++; }
   macro List<T>& ls() { return _ls; }
   macro void insert(u32 index, T t)
-  { _ls.insert(index+a, t); }
+  { _ls.insert(index+a, t); b++; }
   macro void rmv(u32 index)
-  { _ls.rm(a+index); }
+  { _ls.rm(a+index); b--; }
   macro void rmv(u32 from_, u32 to_)
-  { _ls.rm(a+from_, a+to_); }
+  { _ls.rm(a+from_, a+to_); b -= to_ - from_; }
   macro u32 len() const { return b-a; }
   macro T& operator [] (u32 i) { return _ls[a+i]; }
   macro const T& operator [] (u32 i) const { return _ls[a+i]; }

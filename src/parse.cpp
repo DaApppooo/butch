@@ -330,7 +330,6 @@ Match Rule::_match_context(
   Pack<Unit>& units,
   List<Rule::Pt>& u
 ) {
-  // welcome to cache-misses hell
 #define LD_BEGIN(IDX) \
   p._comp_str(p.classes[p.in_class(p.rules[ctx.begin[0]], 0)]);
   
@@ -343,13 +342,14 @@ Match Rule::_match_context(
   assert(units.len() == 1);
   const u32 units_s_start = units[0].s_start;
   const u32 units_s_end = units_s_start + units[0].s_len;
-  depth.init();
+  depth = List<u8>::init();
   do
   {
     m = p.rules[ctx.begin[0]]._sequence_match(p, units, u);
     if (!m.matched)
     {
       m = TOTAL_FAILURE;
+      puts("C");
       goto FAILURE;
     }
     do
@@ -371,6 +371,7 @@ Match Rule::_match_context(
     if (sub_m.matched && sub_m.s_start < m.s_start)
     {
       m = TOTAL_FAILURE;
+          puts("B");
       goto FAILURE;
     }
   }
@@ -409,6 +410,7 @@ Match Rule::_match_context(
         {
           units[0].id = Unit::ERROR_CONTEXT_MISMATCH;
           m = BUTCH_FAIL;
+          puts("A");
           goto FAILURE;
         }
         depth.pop();
@@ -450,6 +452,7 @@ Match Rule::_match_context(
   depth.drop();
   return m;
 FAILURE:
+  puts("FAILED");
   assert(!m.matched);
   units[0].s_start = units_s_start;
   units[0].s_len = units_s_end - units_s_start;
@@ -492,12 +495,12 @@ Match Rule::_sequence_match(
   u.clear();
   u.push(0, 0);
   u.push(0, 0);
-  // printf("===== Rule %s : units.len=%u =====\n",
-  //        out >= 0 ? p._load_str(p.classes[out]) : "Begin/End",
-  //        units.len
-  // );
-  // p.debug_output(stdout, units.ls().to_view());
-  // puts("=== vvv ===");
+  printf("===== Rule %s : units.len=%u =====\n",
+         out >= 0 ? p._load_str(p.classes[out].to_const()) : "Begin/End",
+         units.len()
+  );
+  p.debug_output(stdout, units.ls().to_view());
+  puts("=== vvv ===");
   while (u[-1].r < input_len)
   {
     // printf(">>> |u|=%u u[-1]={.r=%i,.u=%i}\n",
@@ -702,10 +705,8 @@ bool Parser::_check_and_do_rule(
   const rule_id rule_idx = &r - rules.data();
   Pack<Unit>::State state;
 
-  // char c = classes[r.out].fix();
-  // printf(">>>> %s <<<<\n", classes[r.out].start);
-  // classes[r.out].mov(c);
-  // debug_output(stdout, out.to_view());
+  println(">>>> {} <<<<\n", _load_str(classes[r.out].to_const()));
+  debug_output(stdout, out.to_view());
 
   if (r.is_context())
   {
@@ -821,9 +822,8 @@ bool Parser::_check_and_do_rule(
 Parser::Output Parser::parse(Ref<char*> s)
 {
   Pack<Unit> out;
-  List<Rule::Pt> pt_buffer;
+  mut pt_buffer = List<Rule::Pt>::init();
   out.init();
-  pt_buffer.init();
   parsed_code = {s, (u32)str_len_s(s)};
 
   if (_should_be_trimmed(0, parsed_code.len()))
