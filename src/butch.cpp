@@ -63,6 +63,11 @@ rule_id Parser::get_rule(const char* s) const
     if (classes[rules[i].out] == alt)
       return i;
   }
+  for (class_id i = 0; i < classes.len(); i++)
+  {
+    if (classes[i] == alt)
+      return Unit::CLASS_ONLY_OFFSET - i;
+  }
   return Rule::UNKNOWN_RULE;
 }
 

@@ -164,8 +164,8 @@ Match Rule::_match_str(
   const View<const char> big = units[u[-1].u].str(p);
   const View<const char> patt
     = p.classes[cid].shortened(1,1).to_const();
-  if (units[u[-1].u].reparse_ctx != Unit::NO_REPARSE)
-    return BUTCH_FAIL;
+  // if (units[u[-1].u].reparse_ctx != Unit::NO_REPARSE)
+  //   return BUTCH_FAIL;
   if ((s = _butch_str_match(big, patt, iso_mode)).begin())
   {
     u[-1].r++;
@@ -188,8 +188,8 @@ Match Rule::_match_rgx(
   View<char> s;
   const View<const char> big = units[u[-1].u].str(p);
   const View<const char> patt = p.classes[cid].to_const();
-  if (units[u[-1].u].reparse_ctx != Unit::NO_REPARSE)
-    return BUTCH_FAIL;
+  // if (units[u[-1].u].reparse_ctx != Unit::NO_REPARSE)
+  //   return BUTCH_FAIL;
   if ((s = p._rgx_match(big.to_mut(), p.regex_patterns[patt.len()])).begin())
   {
     u[-1].r++;
@@ -202,6 +202,12 @@ Match Rule::_match_rgx(
   }
   return Rule::TOTAL_FAILURE;
 }
+
+bool _butch_check_and_do_blocks(
+  Parser& p,
+  Pack<Unit>& out,
+  List<Rule::Pt>& pt_buffer
+);
 
 int _butch_split_token(
   Parser& p,
@@ -230,7 +236,7 @@ void _debug(Parser& p, Pack<Unit>& units)
   p.debug_output(stdout, units.ls().to_view());
 }
 
-void _butch_apply_context(
+void _butch_apply_block(
   Parser& p,
   Pack<Unit>& units,
   List<Rule::Pt>& u,
@@ -241,13 +247,15 @@ void _butch_apply_context(
   assert(units[0].id == Unit::LITERAL);
   assert(units.len() == 1);
   Unit* parent = &units[0];
-  bool common_malcom_do_somethin = true;
+  bool common_malcom_do_somethin;
   assert(m.matched);
   const u32 units_s_start = parent->s_start;
   const u32 units_s_len = parent->s_len;
   const i32 begin_len = m.u_start;
   const i32 head_len = i32(m.s_start) - units_s_start - begin_len;
-  if (!p._should_be_trimmed(units_s_start, head_len))
+  const bool start_should_be_trimmed =
+    p._should_be_trimmed(units_s_start, head_len);
+  if (!start_should_be_trimmed)
   {
     assert(m.s_start - units_s_start - begin_len > 0);
     units.insert(0, Unit::init(
@@ -272,21 +280,11 @@ void _butch_apply_context(
       0
     ));
     units.eat();
-    while (common_malcom_do_somethin)
+    do
     {
-      common_malcom_do_somethin = false;
-      u32 i = 0;
-      for (Rule& r : p.rules.slice(ctx.rules_start, ctx.rule_count))
-      {
-        if (r.out == Rule::BEGIN || r.out == Rule::END)
-        { i++; continue; }
-        printf("Sub-check rule %i\n", i+ctx.rules_start);
-        common_malcom_do_somethin =
-          p._check_and_do_rule(r, units, u)
-          || common_malcom_do_somethin;
-        i++;
-      }
-    }
+      common_malcom_do_somethin =
+        _butch_check_and_do_blocks(p, units, u);
+    } while (common_malcom_do_somethin);
     units.burp();
     units[0].children_len = units.len()-1;
   }
@@ -302,6 +300,8 @@ void _butch_apply_context(
       0
     ));
   }
+  if (!start_should_be_trimmed)
+    units.burp();
 }
 
 Match _butch_find_first_depth_stopper(
@@ -325,7 +325,7 @@ Match _butch_find_first_depth_stopper(
   return ds_m;
 }
 
-Match Rule::_match_context(
+Match Rule::_match_block(
   Parser& p,
   Pack<Unit>& units,
   List<Rule::Pt>& u
@@ -333,7 +333,7 @@ Match Rule::_match_context(
 #define LD_BEGIN(IDX) \
   p._comp_str(p.classes[p.in_class(p.rules[ctx.begin[0]], 0)]);
   
-  const Context& ctx = p.ctxs[get_context()];
+  const Context& ctx = p.ctxs[get_block()];
   Match m, sub_m, ds_m;
   List<u8> depth; // indicies in the ctx.begin and ctx.end
   assert(units[0].id == Unit::LITERAL);
@@ -349,7 +349,6 @@ Match Rule::_match_context(
     if (!m.matched)
     {
       m = TOTAL_FAILURE;
-      puts("C");
       goto FAILURE;
     }
     do
@@ -371,7 +370,6 @@ Match Rule::_match_context(
     if (sub_m.matched && sub_m.s_start < m.s_start)
     {
       m = TOTAL_FAILURE;
-          puts("B");
       goto FAILURE;
     }
   }
@@ -394,11 +392,17 @@ Match Rule::_match_context(
         units[0].s_start += ds_m.s_len;
         units[0].s_len -= ds_m.s_len;
       }
-      else
+      else if (ds_m.matched)
       {
-        units[0].s_len = ds_m.s_start - units[0].s_start;
+        assert(!__builtin_add_overflow(
+          units[0].s_len,
+          ds_m.s_start - units[0].s_start,
+          &units[0].s_len
+        ));
         break;
       }
+      else
+        break;
     } while (true);
     sub_m.matched = false;
     for (u8 i : range<u8>(u8(ctx.be_count)))
@@ -408,9 +412,8 @@ Match Rule::_match_context(
       {
         if (depth[-1] != i)
         {
-          units[0].id = Unit::ERROR_CONTEXT_MISMATCH;
+          units[0].id = Unit::ERROR_BLOCK_MISMATCH;
           m = BUTCH_FAIL;
-          puts("A");
           goto FAILURE;
         }
         depth.pop();
@@ -452,7 +455,6 @@ Match Rule::_match_context(
   depth.drop();
   return m;
 FAILURE:
-  puts("FAILED");
   assert(!m.matched);
   units[0].s_start = units_s_start;
   units[0].s_len = units_s_end - units_s_start;
@@ -495,12 +497,12 @@ Match Rule::_sequence_match(
   u.clear();
   u.push(0, 0);
   u.push(0, 0);
-  printf("===== Rule %s : units.len=%u =====\n",
-         out >= 0 ? p._load_str(p.classes[out].to_const()) : "Begin/End",
-         units.len()
-  );
-  p.debug_output(stdout, units.ls().to_view());
-  puts("=== vvv ===");
+  // printf("===== Rule %s : units.len=%u =====\n",
+  //        out >= 0 ? p._load_str(p.classes[out].to_const()) : "Begin/End",
+  //        units.len()
+  // );
+  // p.debug_output(stdout, units.ls().to_view());
+  // puts("=== vvv ===");
   while (u[-1].r < input_len)
   {
     // printf(">>> |u|=%u u[-1]={.r=%i,.u=%i}\n",
@@ -618,7 +620,8 @@ Match Rule::_sequence_match(
           else
             FAIL;
         }
-        else if (p.rules[units[u[-1].u].id].out != *CPTR(-1))
+        else if (p.rules[units[u[-1].u].id].out != *CPTR(-1)
+              && units[u[-1].u].id != Unit::CLASS_ONLY_OFFSET - *CPTR(-1))
         {
           FAIL;
         } else {
@@ -670,27 +673,69 @@ void _butch_reparse(
 ) {
   assert(out.a > 0);
   Pack<Unit>::State state;
+  bool did_something;
+  println("OUT = {} {}", out.a, out.b);
   for (u32 i = 0; i < out.len(); _next(i, out.to_view()))
   {
     if (out[i].reparse_ctx >= 0)
     {
-      const rule_id prev = out[i].id;
-      const i32 prev_cc = out[i].children_len;
-      out.rmv(i+1, i+1+prev_cc);
-      out[i].id = Unit::LITERAL;
-      state = out.set(i, 1);
-      _butch_apply_context(
-        p,
-        out,
-        pt_buffer,
-        p.ctxs[out[0].reparse_ctx],
-        prev,
-        Match{out[0].s_start, out[0].s_len, true, 0, 0}
-      );
-      out.reset(state);
-      out[i].id = prev;
+      let reparse_ctx_index = out[i].reparse_ctx;
+      let prev_rid = out[i].id;
+      let prev_cc = out[i].children_len;
+      let& ctx = p.ctxs[reparse_ctx_index];
+      if (out[i].s_len == 0)
+      {
+        out[i].id = Unit::CLASS_ONLY_OFFSET - ctx.name;
+        continue;
+      }
+      println("REPARSE {}", p._load_str(p.classes[ctx.name].to_const()));
+      println("OUT = {} {}", out.a, out.b);
+      println("i = {}", i);
+      _debug(p, out);
+      out.rmv(i+2, i+1+prev_cc); // remove children except the first
+      out[i+1].id = Unit::LITERAL; // first children becomes the literal
+      out[i+1].s_start = out[i].s_start;
+      out[i+1].s_len = out[i].s_len;
+      // set class name for parent unit
+      out[i].id = Unit::CLASS_ONLY_OFFSET - ctx.name;
       out[i].reparse_ctx = Unit::NO_REPARSE;
-      out.ls()[out.a-1].children_len += out[i].children_len - prev_cc;
+      out[i].children_len = 1;
+      state = out.set(i, 1);
+      println("OUT = {} {}", out.a, out.b);
+
+      {
+        // 1. blocks
+        do {
+          did_something = _butch_check_and_do_blocks(p, out, pt_buffer);
+        } while (did_something);
+
+        // 2. other rules
+        do
+        {
+          did_something = false;
+          for (u32 j : range(ctx.rules_start, ctx.rules_start+ctx.rule_count))
+          {
+            did_something =
+              p._check_and_do_rule(p.rules[j], out, pt_buffer)
+              || did_something;
+          }
+        } while (did_something);
+      }
+
+      println("OUT = {} {}", out.a, out.b);
+      println("STATE = {} {} {}", state.ai, state.bi, state.bj0);
+      out.reset(state);
+      println("OUT = {} {}", out.a, out.b);
+      println("out[i].id = {}", out[i].id);
+      assert(out[i].id == Unit::LITERAL);
+      // Extend parents with new children
+      let additional_children = out[i].children_len - prev_cc;
+      let current = out.a + i;
+      for (let j : range(current))
+      {
+        if (out.ls()[j].children_len + j >= current)
+          out.ls()[j].children_len += additional_children;
+      }
     }
   }
 }
@@ -708,33 +753,8 @@ bool Parser::_check_and_do_rule(
   println(">>>> {} <<<<\n", _load_str(classes[r.out].to_const()));
   debug_output(stdout, out.to_view());
 
-  if (r.is_context())
-  {
-    for (u32 i = 0; i < out.len(); _next(i, out.to_view()))
-    {
-      if (out[i].id == Unit::LITERAL)
-      {
-        state = out.set(i, 1);
-        match = r._match_context(*this, out, pt_buffer);
-        if (match.matched)
-        {
-          _butch_apply_context(
-            *this,
-            out,
-            pt_buffer,
-            ctxs[r.get_context()],
-            rule_idx,
-            match
-          );
-          did_something = true;
-          i += out.len()-1;
-        }
-        out.reset(state);
-      }
-    }
-  }
-  else if (r.is_alias())
-    return false; // this is an alias
+  if (r.is_block() || r.is_alias())
+    return false;
   else if (r.is_token())
   {
     // token (no peeping can happen here)
@@ -781,7 +801,7 @@ bool Parser::_check_and_do_rule(
           _butch_reparse(*this, out, pt_buffer);
           out.reset(state);
           did_something = true;
-          j++;
+          j = i;
         }
         _next(j, out.to_view());
       }
@@ -807,11 +827,11 @@ bool Parser::_check_and_do_rule(
                  match.u_end-match.u_start
             )
           );
-          state = out.set(i+match.u_start+1, match.u_end-match.u_start-1);
+          state = out.set(i+match.u_start+1, match.u_end-match.u_start);
           _butch_reparse(*this, out, pt_buffer);
           out.reset(state);
           did_something = true;
-          j++;
+          j = i;
         }
       }
     }
@@ -819,9 +839,50 @@ bool Parser::_check_and_do_rule(
   return did_something;
 }
 
+bool _butch_check_and_do_blocks(
+  Parser& p,
+  Pack<Unit>& out,
+  List<Rule::Pt>& pt_buffer
+) {
+  Match match;
+  Pack<Unit>::State state;
+  bool ret = false;
+  for (let rid : p.blocks)
+  {
+    for (u32 i = 0; i < out.len();)
+    {
+      match.matched = false;
+      if (out[i].id == Unit::LITERAL)
+      {
+        state = out.set(i, 1);
+        match = p.rules[rid]._match_block(p, out, pt_buffer);
+        if (match.matched)
+        {
+          _butch_apply_block(
+            p,
+            out,
+            pt_buffer,
+            p.ctxs[p.rules[rid].get_block()],
+            rid,
+            match
+          );
+          ret = true;
+          i = 0;
+        }
+        out.reset(state);
+      }
+      if (!match.matched)
+      { _next(i, out.to_view()); }
+    }
+  }
+  return ret;
+}
+
 Parser::Output Parser::parse(Ref<char*> s)
 {
   Pack<Unit> out;
+  Pack<Unit>::State state;
+  bool did_something;
   mut pt_buffer = List<Rule::Pt>::init();
   out.init();
   parsed_code = {s, (u32)str_len_s(s)};
@@ -831,9 +892,15 @@ Parser::Output Parser::parse(Ref<char*> s)
 
   out.push(Unit::init(Unit::LITERAL, 0, str_len_s(s), 0));
 
-  for (;;)
+  // 1. blocks
+  do {
+    did_something = _butch_check_and_do_blocks(*this, out, pt_buffer);
+  } while (did_something);
+
+  // 2. other rules
+  do
   {
-    bool did_something = false;
+    did_something = false;
     const uint32_t global_end =
       ctxs.len() > 0
       ? ctxs[0].rules_start
@@ -844,12 +911,11 @@ Parser::Output Parser::parse(Ref<char*> s)
         _check_and_do_rule(rules[i], out, pt_buffer)
         || did_something;
     }
-    if (!did_something) break;
-  }
+  } while (did_something);
 
   pt_buffer.drop();
 
-  return {out.data(), out.len()};
+  return {out._ls.data(), out._ls.len()};
 }
 
 
@@ -857,14 +923,19 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
 {
   int8_t depth_pt = 0;
   int32_t depth_stack[127];
+  View<char> s;
   for (u32 i = 0; i < ls.len(); i++)
   {
+    fprintf(f, "%04i ", i);
     for (i8 j = 0; j < depth_pt; j++)
       fprintf(f, "  ");
-    const View<char> s =
-      ls[i].id == Unit::LITERAL ? ls[i].str(*this).to_mut()
-                                : classes[rules[ls[i].id].out];
-    if (ls[i].reparse_ctx == Unit::ERROR_CONTEXT_MISMATCH)
+    if (ls[i].id == Unit::LITERAL)
+      s = ls[i].str(*this).to_mut();
+    else if (ls[i].id <= Unit::CLASS_ONLY_OFFSET)
+      s = classes[Unit::CLASS_ONLY_OFFSET - ls[i].id];
+    else
+      s = classes[rules[ls[i].id].out];
+    if (ls[i].reparse_ctx == Unit::ERROR_BLOCK_MISMATCH)
       fprintf(f, "(!CONTEXT_MISMATCH)");
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
@@ -873,8 +944,9 @@ void Parser::debug_output(FILE* f, const View<Unit> ls)
     if (ls[i].id == Unit::LITERAL)
       putc('"', f);
     putc(' ', f);
-    // fprintf(f, "(%i) ", ls[i].children_len);
-    if (ls[i].id != Unit::LITERAL && rules[ls[i].id].is_token())
+    if (ls[i].id != Unit::LITERAL
+        && rules[ls[i].id].is_token()
+        && ls[i].s_len > 0)
       fprintf(f, "'%s'", _load_str(ls[i].str(*this)));
     else
       fprintf(f, "[%i:+%i]", ls[i].s_start, ls[i].s_len);

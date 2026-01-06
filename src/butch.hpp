@@ -13,7 +13,7 @@
 template <class T>
 struct Pack
 {
-  struct State { u32 a,b; };
+  struct State { u32 ai,bi,bj0; };
   List<T> _ls;
   u32 a, b;
   macro void init()
@@ -41,15 +41,17 @@ struct Pack
   macro void burp() { a--; }
   macro State set(u32 c, u32 len)
   {
-    State ret = { a, b };
+    State ret = { a, b, a+c+len };
     a += c;
     b = a+len;
     return ret;
   }
   macro void reset(State state)
   {
-    a = state.a;
-    b = state.b;
+    // NOTE: i32 cast should not be necessary because of modulo arithmetic
+    // but just to be sure we do it anyway.
+    a = state.ai;
+    b = state.bi + i32(b) - i32(state.bj0);
   }
 };
 
@@ -60,8 +62,12 @@ struct Parser;
 #define FLAG_T static constexpr uint32_t
 struct Unit
 {
-  static constexpr rule_id LITERAL = -1; // for Unit.id
-  static constexpr ctx_id ERROR_CONTEXT_MISMATCH = -2;
+  // for Unit.id
+  static constexpr rule_id LITERAL = -1;
+  // if .id <= CLASS_ONLY_OFFSET then CLASS_ONLY_OFFSET - .id is a class name
+  static constexpr rule_id CLASS_ONLY_OFFSET = -2;
+  // for reparse_ctx
+  static constexpr ctx_id ERROR_BLOCK_MISMATCH = -2;
   static constexpr ctx_id NO_REPARSE = -1;
   uint32_t s_start;
   // number of children units following this unit in the output unit vector
@@ -110,7 +116,7 @@ struct UnitNodeWrapper
     len - current->children_len - 1
   }; }
   Self first_child() const
-  { return { current + 1 }; }
+  { return { current + 1, current->children_len }; }
 
   inline uint32_t child_count() const { return current->children_len; }
   
@@ -193,7 +199,7 @@ struct Rule
   
   static constexpr rule_id STRING = -10;
   static constexpr rule_id REGEX = -11;
-  static constexpr rule_id UNKNOWN_RULE = -12;
+  static constexpr rule_id UNKNOWN_RULE = INT32_MIN;
   static constexpr rule_id UNKNOWN_REPARSE = -13;
   static constexpr rule_id REPARSE = -14;
 
@@ -213,22 +219,22 @@ struct Rule
     self._flags = 0;
     return self;
   }
-  static Rule init_context(class_id cid, ctx_id ctid)
+  static Rule init_block(class_id cid, ctx_id ctid)
   {
     assert(ctid >= 0);
     Rule self;
     self.ruleset_start = ctid;
     self.input_len = 0;
-    self.is_context(true);
+    self.is_block(true);
     self.out = cid;
     return self;
   }
-  static Rule init_unknown_context(class_id cid)
+  static Rule init_unknown_block(class_id cid)
   {
     Rule self;
     self.ruleset_start = 0;
     self.input_len = 1;
-    self.is_context(true); 
+    self.is_block(true); 
     self.out = cid;
     return self;
   }
@@ -239,6 +245,13 @@ struct Rule
     self.out = out;
     return self;
   }
+  static Rule init_reparse(class_id out)
+  {
+    Rule self;
+    self._flags = _REPARSE_RULE;
+    self.out = out;
+    return self;
+  }
 
   static constexpr uint32_t _TOKEN        = 0b0001;
   static constexpr uint32_t _PREPEEP      = 0b0010;
@@ -246,9 +259,10 @@ struct Rule
   static constexpr uint32_t _TWOPEEP      = 0b0110;
   static constexpr uint32_t _RL_PARSE     = 0b1000;
 
-  static constexpr uint32_t _CONTEXT      = 0b0101;
+  static constexpr uint32_t _BLOCK        = 0b0101;
   static constexpr uint32_t _ALIAS        = 0b0011;
   static constexpr uint32_t _UNKNOWN_COPY = 0b1011;
+  static constexpr uint32_t _REPARSE_RULE = 0b1101;
   constexpr bool is_token() const
   { return _flags == _TOKEN; }
   constexpr bool is_token(bool x)
@@ -271,22 +285,20 @@ struct Rule
   { if (x) _flags = _ALIAS; return is_alias(); }
   constexpr bool is_unknown_copy() const
   { return _flags == _UNKNOWN_COPY; }
-  constexpr bool is_context() const
-  { return _flags == _CONTEXT; }
-  constexpr bool is_context(bool x)
-  { if (x) _flags = _CONTEXT; return is_context(); }
-  constexpr bool is_unknown_context() const
-  { return is_context() && input_len == 1; }
-  constexpr void set_context(ctx_id ctid)
-  { assert(is_context()); input_len = 0; ruleset_start = ctid; }
-  constexpr ctx_id get_context() const
-  { assert(is_context() && input_len == 0); return ruleset_start; }
-  void _apply_context(
-    Parser&,
-    Pack<Unit>&,
-    List<Rule::Pt>&,
-    Match m
-  );
+  constexpr bool is_block() const
+  { return _flags == _BLOCK; }
+  constexpr bool is_block(bool x)
+  { if (x) _flags = _BLOCK; return is_block(); }
+  constexpr bool is_reparse() const
+  { return _flags == _REPARSE_RULE; }
+  constexpr bool is_reparse(bool x)
+  { if (x) _flags = _REPARSE_RULE; return is_block(); }
+  constexpr bool is_unknown_block() const
+  { return is_block() && input_len == 1; }
+  constexpr void set_block(ctx_id ctid)
+  { assert(is_block()); input_len = 0; ruleset_start = ctid; }
+  constexpr ctx_id get_block() const
+  { assert(is_block() && input_len == 0); return ruleset_start; }
 
   Match _sequence_match(
     Parser&,
@@ -305,7 +317,7 @@ struct Rule
     List<Pt>&,
     const class_id
   );
-  Match _match_context(
+  Match _match_block(
     Parser& p,
     Pack<Unit>& units,
     List<Rule::Pt>& u
@@ -413,6 +425,7 @@ struct Parser
   struct RulePack
   { View<char> class_name; Rule rule; };
   Own<char*> butch_code;
+  List<rule_id> blocks;
   List<Context> ctxs;
   List<Rule> rules;
   List<View<char>> classes;
